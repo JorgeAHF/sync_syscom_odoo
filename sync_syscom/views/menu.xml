@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+        <menuitem id="menu_sync_syscom_root" name="SyncSyscom" groups="sync_syscom.group_sync_syscom_manager"/>
+    </data>
+</odoo>
