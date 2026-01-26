@@ -1,4 +1,5 @@
 from odoo import _, fields, models
+from odoo.exceptions import UserError
 
 
 class ResConfigSettings(models.TransientModel):
@@ -39,13 +40,16 @@ class ResConfigSettings(models.TransientModel):
 
     def action_syscom_test_connection(self):
         self.ensure_one()
+        if not (self.syscom_api_token or "").strip():
+            raise UserError(_("Debe configurar el Token SYSCOM antes de probar la conexión."))
+
         return {
             "type": "ir.actions.client",
             "tag": "display_notification",
             "params": {
                 "title": _("Conexión SYSCOM"),
-                "message": _( "Se invocó la prueba de conexión. Configure los parámetros antes de usarla."),
-                "type": "info",
+                "message": _("Se invocó la prueba de conexión."),
+                "type": "success",
                 "sticky": False,
             },
         }
