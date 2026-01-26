@@ -1,0 +1,1874 @@
+openapi: "3.0.0"
+info:
+  version: 1.0.0
+  title: SYSCOM API
+  description: API de SYSCOM para buscar productos, crear y ver listas.
+  contact:
+    name: SYSCOM API Team
+servers:
+  - url: https://developers.syscom.mx/api/v1
+
+tags:
+  - name: Categorías
+    description: |
+      URL Base: `https://developers.syscom.mx/api/v1/`
+
+      | Método | Operación | Uso  | Devuelve |
+      | ------ |:-------------|:-----|---  |
+      | GET | /v1/categorias/{id} | Obtener una categoría | categoría  |
+      | GET | /v1/categorias | Obtener categorías base | categorías  |
+  - name: Carrito
+    description: |
+      URL Base: `https://developers.syscom.mx/api/v1/`
+
+      | Método | Operación | Uso  | Devuelve |
+      | ------ |:-------------|:-----|---  |
+      | POST | /v1/carrito/generar | Generar un pedido | carrito  |
+      | GET | /v1/carrito/direcciones | Obtener la lista de las direcciones guardadas | lista  |
+      | POST | /v1/carrito/direcciones | Inserta una nueva dirección | direccion  |
+      | POST | /v1/carrito/direcciones/{id} | Actualiza una dirección | direccion  |
+      | DELETE | /v1/carrito/direcciones/{id} | Elimina una dirección | direccion  |
+      | GET | /v1/carrito/paises | Obtener la lista de paises validos | lista  |
+      | GET | /v1/carrito/estados/{id} | Obtener la lista de estados por código postal | lista  |
+      | GET | /v1/carrito/colonias/{id} | Obtener la lista de colonias por código postal | lista  |
+      | GET | /v1/carrito/pago | Obtener la lista de formas de pagos disponibles | lista  |
+      | GET | /v1/carrito/fleteras| Obtener la lista de fleteras disponibles | lista  |
+      | GET | /v1/carrito/sucursales| Obtener la lista de las sucursales disponibles | lista  |
+      | GET | /v1/carrito/cfdi| Obtener la lista de uso de CFDI disponibles | lista  |
+  - name: Facturas
+    description: |
+      URL Base: `https://developers.syscom.mx/api/v1/`
+
+      | Método | Operación | Uso  | Devuelve |
+      | ------ |:-------------|:-----|---  |
+      | GET | /v1/facturas/{id} | Obtener una factura | factura  |
+      | GET | /v1/facturas | Obtener una lista de facturas | lista  |
+  - name: Marcas
+    description: |
+      URL Base: `https://developers.syscom.mx/api/v1/`
+
+      | Método | Operación | Uso  | Devuelve |
+      | ------ |:-------------|:-----|---  |
+      | GET | /v1/marcas/{id} | Obtener una marca | marca  |
+      | GET | /v1/marcas/{id}/productos | Obtener productos de una marca | productos  |
+      | GET | /v1/marcas | Obtener todas las marcas | marcas  |
+  - name: Productos
+    description: |
+      URL Base: `https://developers.syscom.mx/api/v1/`
+
+      | Método | Operación | Uso  | Devuelve |
+      | ------ |:-------------|:-----|---  |
+      | GET | /v1/productos/{id} | Obtener un producto | producto  |
+      | GET | /v1/productos/{id}/relacionados | Obtener productos relacionados | productos  |
+      | GET | /v1/productos/{id}/accesorios | Obtener accesorios de un producto | productos  |
+      | GET | /v1/productos | Buscar productos | productos  |
+  - name: Utilidades
+    description: |
+      URL Base: `https://developers.syscom.mx/api/v1/`
+
+      | Método | Operación | Uso  | Devuelve |
+      | ------ |:-------------|:-----|---  |
+      | GET | /v1/tipocambio | Obtener el tipo de cambio vigente | objecto  |
+  - name: Wishlist
+    description: |
+      URL Base: `https://developers.syscom.mx/api/v1/`
+
+      | Método | Operación | Uso  | Devuelve |
+      | ------ |:-------------|:-----|---  |
+      | GET | /v1/wishlist/{id} | Obtener una lista | lista  |
+      | DELETE | /v1/wishlist/{id} | Eliminar una lista | -  |
+      | POST | /v1/wishlist/{id}/productos/{producto_id} | Agregar un producto a una lista | lista  |
+      | DELETE | /v1/wishlist/{id}productos/{producto_id} | Eliminar un producto de una lista | -  |
+      | GET | /v1/wishlist | Obtener todas las listas | listas  |
+paths:
+  /categorias:
+    get:
+      description: |
+        Devuelve el nombre e ID de todas las categorías nivel 1.
+      tags:
+        - Categorías
+      operationId: Obtener categorías
+      responses:
+        '200':
+          description: lista de categorías
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Categoría'
+              example:
+                - id: '22'
+                  nombre: Videovigilancia
+                  nivel: 1
+                - id: '25'
+                  nombre: Radiocomunicación
+                  nivel: 1
+                - id: '26'
+                  nombre: Redes
+                  nivel: 1
+                - id: '27'
+                  nombre: GPS, Luces de Emergencia y Transporte
+                  nivel: 1
+                - id: '30'
+                  nombre: Energía
+                  nivel: 1
+                - id: '32'
+                  nombre: Automatización e Intrusión
+                  nivel: 1
+                - id: '37'
+                  nombre: Control de Acceso
+                  nivel: 1
+                - id: '38'
+                  nombre: Detección de Fuego
+                  nivel: 1
+                - id: '65811'
+                  nombre: Cableado Estructurado
+                  nivel: 1
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /categorias/{id}:
+    get:
+      description: Devuelve la información de la categoría. Esto incluye ID, nombre, subcategoría y categorías de origen.
+      tags:
+        - Categorías
+      operationId: Buscar categoría por ID
+      parameters:
+        - name: ID
+          in: path
+          description: ID de la categoría
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Detalle de categoría
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CategoríaDetalle'
+              example:
+                id: '207'
+                nombre: Conectores
+                nivel: '2'
+                origen:
+                - id: '22'
+                  nombre: Videovigilancia
+                  nivel: '1'
+                subcategorías:
+                - id: '1295'
+                  nombre: Para Alimentación
+                  nivel: '3'
+                - id: '1299'
+                  nombre: RG59 Tipo CaP
+                  nivel: '3'
+                - id: '1301'
+                  nombre: Adaptador a RCA
+                  nivel: '3'
+                - id: '2294'
+                  nombre: Terminadores
+                  nivel: '3'
+                - id: '2304'
+                  nombre: Para Audio
+                  nivel: '3'
+                - id: '65869'
+                  nombre: RG59 / RG6 / RG11
+                  nivel: '3'
+                - id: '65917'
+                  nombre: Para Redes RJ45
+                  nivel: '3'
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /carrito/generar:
+    post:
+      description: Genera un pedido a partir de la información de entrega, forma de pago y productos recibidos
+      tags:
+        - Carrito
+      operationId: Generar una orden
+      parameters:
+        - name: tipo_entrega
+          in: query
+          description: "Forma en la que se entregará la mercancía"
+          required: true
+          schema:
+            type: string
+            enum: [domicilio, sucursal]
+        - name: direccion
+          in: query
+          description: "Dirección de entrega de mercancía, ejemplo {'atencion_a':'sucursal','chihuahua'}"
+          required: true
+          schema:
+            type: object
+            enum: [ID dirección guardada, Objeto Dirección, atención_a + Código sucursal]
+        - name: metodo_pago
+          in: query
+          description: ID del metodo de pago 
+          required: true
+          schema:
+            type: string
+        - name: productos
+          in: query
+          description: Arreglo de productos {id:id, tipo:'nuevo,a,b,c,d,e', cantidad:x}
+          required: true
+          schema:
+            $ref: '#/components/schemas/ProductoCarrito'
+        - name: moneda
+          in: query
+          description: "Moneda utilizada en la orden" 
+          required: true
+          schema:
+            type: string
+            enum: [mxn, usd]
+        - name: uso_cfdi
+          in: query
+          description: ID del uso de cfdi
+          required: true
+          schema:
+            type: string
+        - name: tipo_pago
+          in: query
+          description: Forma de pago utilizada en la orden
+          schema:
+            type: string
+            default: pue
+            enum: [pue,ppd]
+        - name: fletera
+          in: query
+          description: Fletera utilizada al realizar la compra, requiere el código de la sección fletera
+          schema:
+            type: string
+        - name: orden_compra
+          in: query
+          description: Dato adicional para añadir un folio personalizado a la orden
+          schema:
+            type: string
+        - name: ordenar
+          in: query
+          description: Determina si el carrito realizará una orden o una cotización (las cotizaciones no apartan mercancía)
+          schema:
+            type: string
+            enum: [true,false]
+            default: false
+        - name: iva_frontera
+          in: query
+          description: "Forzar IVA a 8% en zonas fronterizas"
+          schema:
+            type: boolean
+            enum: [true,false]
+            default: true
+        - name: forzar
+          in: query
+          description: Permite completar una orden incluso si no hay stock de un producto, el producto sin stock se removerá del pedido final.
+          schema:
+            type: boolean
+            enum: [true, false]
+            default: false
+        - name: testmode
+          in: query
+          description: Activa el modo de pruebas, con el cual no se genera ni cotización ni pedido pero sigue el proceso como si se hubiera realizado
+          schema:
+            type: boolean
+            enum: [true, false]
+            default: false
+        - name: pdf_guia
+          in: query
+          description: Incluir archivo jpg, png, jpeg, doc, docx, pdf de la guía. Máximo 6mb
+          schema:
+            type: file
+        - name: directo_cliente
+          in: query
+          description: Activar el envío directo al cliente para no incluir facturas con precios
+          schema:
+            type: boolean
+            enum: [true, false]
+            default: false
+      responses:
+        '200':
+          description: Toda la info del pedido
+          content:
+            aplication/json:
+              example:
+                cliente: 
+                    num_cliente: '104XXXXXX'
+                    rfc: 'XEXX010101000'
+                    whatsapp: '123456789'
+                    email: 'test@correo.com'
+                    telefono": '123456789'
+                resumen: 
+                    peso_total: '6.86'
+                    peso_vol_total: '3.0559'
+                    moneda: 'MXN'
+                    forma_pago: '2'
+                    tipo_cambio: '22.73'
+                    plazo: '0'
+                    codigo_pago: '02'
+                    folio: '576-XXXXXX/XX-API'
+                    folio_pedido: '576-XXXXXX/XX-API'
+                    fecha_creacion: '2022-11-19 00:53:57'
+
+                datos_entrega:
+                    calle: 'CALLE'
+                    num_exterior: '1234'
+                    num_interior: ''
+                    colonia: 'COLONIA'
+                    ciudad: 'CIUDAD'
+                    estado: 'ESTADO'
+                    pais: 'PAIS'
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /carrito/direcciones:
+    get:
+      description: Obtiene la lista de direcciones guardadas en la página de SYSCOM
+      tags:
+        - Carrito
+      operationId: Obtener lista de direcciones
+      responses:
+        '200':
+          description: Obtener lista de todas las direcciones en la cuenta
+          content:
+            aplication/json:
+              example:
+                - id: "1"
+                  atencion_a: "ATENCION A"
+                  calle: "CALLE"
+                  num_ext: "123"
+                  num_int: ""
+                  colonia: "COLONIA"
+                  codigo_postal: "CP"
+                  pais: "PAIS"
+                  estado: "ESTADO"
+                  ciudad: "CIUDAD"
+                  telefono: "123456"
+                - id: "2"
+                  atencion_a: "ATENCION A"
+                  calle: "CALLE"
+                  num_ext: "123"
+                  num_int: ""
+                  colonia: "COLONIA"
+                  codigo_postal: "CP"
+                  pais: "PAIS"
+                  estado: "ESTADO"
+                  ciudad: "CIUDAD"
+                  telefono: "123456"
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      description: Añade una nueva dirección para uso en el API y la página de SYSCOM utilizando un <span style="color:red">objeto dirección</span>
+      tags:
+        - Carrito
+      operationId: Añade una nueva dirección
+      parameters:
+        - name: atencion_a
+          in: query
+          description: "Nombre de la persona que recibe la mercancía"
+          required: true
+          schema:
+            type: string
+        - name: calle
+          in: query
+          description: "Calle del domicilio de la dirección de entrega"
+          required: true
+          schema:
+            type: string
+        - name: colonia
+          in: query
+          description: "Colonia del domicilio de la dirección de entrega"
+          required: true
+          schema:
+            type: string
+        - name: num_ext
+          in: query
+          description: "Número exterior del domicilio de la dirección de entrega"
+          required: true
+          schema:
+            type: integer
+        - name: num_int
+          in: query
+          description: "Número interior del domicilio de la dirección de entrega"
+          schema:
+            type: string
+        - name: codigo_postal
+          in: query
+          description: "Código postal del domicilio de la dirección de entrega"
+          required: true
+          schema:
+            type: string
+        - name: ciudad
+          in: query
+          description: "Ciudad del domicilio de la dirección de entrega"
+          required: true
+          schema:
+            type: string
+        - name: estado
+          in: query
+          description: "Estado del domicilio de la dirección de entrega (usar el parametro codigo_estado de la sección consultar estados)"
+          required: true
+          schema:
+            type: string
+        - name: pais
+          in: query
+          description: "País del domicilio de la dirección de entrega (usar el parametro codigo_pais de la sección consultar paises)"
+          required: true
+          schema:
+            type: string
+        - name: telefono
+          in: query
+          description: "Teléfono de la persona que recibe la mercancía"
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Obtener los datos de una dirección añadida
+          content:
+            aplication/json:
+              example:
+                - id: "1"
+                  atencion_a: "ATENCION A"
+                  calle: "CALLE"
+                  num_ext: "123"
+                  num_int: ""
+                  colonia: "COLONIA"
+                  codigo_postal: "CP"
+                  pais: "PAIS"
+                  estado: "ESTADO"
+                  ciudad: "CIUDAD"
+                  telefono: "123456"
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /carrito/direcciones/{id}:
+    get:
+      description: Obtiene una dirección guardada en la página de SYSCOM
+      tags:
+        - Carrito
+      operationId: Obtener una dirección
+      parameters:
+        - name: id
+          in: path
+          description: "ID de la dirección solicitada"
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Obtener los datos de una dirección recibida
+          content:
+            aplication/json:
+              example:
+                - id: "1"
+                  atencion_a: "ATENCION A"
+                  calle: "CALLE"
+                  num_ext: "123"
+                  num_int: ""
+                  colonia: "COLONIA"
+                  codigo_postal: "CP"
+                  pais: "PAIS"
+                  estado: "ESTADO"
+                  ciudad: "CIUDAD"
+                  telefono: "123456"
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    put:
+      description: Actualiza una dirección guardada en la página de SYSCOM
+      tags:
+        - Carrito
+      operationId: Actualizar una dirección
+      parameters:
+        - name: id
+          in: path
+          description: "ID de la dirección solicitada"
+          required: true
+          schema:
+            type: integer
+        - name: atencion_a
+          in: query
+          description: "Nombre de la persona que recibe la mercancía"
+          required: true
+          schema:
+            type: string
+        - name: calle
+          in: query
+          description: "Calle del domicilio de la dirección de entrega"
+          required: true
+          schema:
+            type: string
+        - name: colonia
+          in: query
+          description: "Colonia del domicilio de la dirección de entrega"
+          required: true
+          schema:
+            type: string
+        - name: num_ext
+          in: query
+          description: "Número exterior del domicilio de la dirección de entrega"
+          required: true
+          schema:
+            type: integer
+        - name: num_int
+          in: query
+          description: "Número interior del domicilio de la dirección de entrega"
+          schema:
+            type: string
+        - name: codigo_postal
+          in: query
+          description: "Código postal del domicilio de la dirección de entrega"
+          required: true
+          schema:
+            type: string
+        - name: ciudad
+          in: query
+          description: "Ciudad del domicilio de la dirección de entrega"
+          required: true
+          schema:
+            type: string
+        - name: estado
+          in: query
+          description: "Estado del domicilio de la dirección de entrega (usar el parametro codigo_estado de la sección consultar estados)"
+          required: true
+          schema:
+            type: string
+        - name: pais
+          in: query
+          description: "País del domicilio de la dirección de entrega (usar el parametro codigo_pais de la sección consultar paises)"
+          required: true
+          schema:
+            type: string
+        - name: telefono
+          in: query
+          description: "Teléfono de la persona que recibe la mercancía"
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Obtener los datos de una dirección actualizada
+          content:
+            aplication/json:
+              example:
+                - id: "1"
+                  atencion_a: "ATENCION A"
+                  calle: "CALLE"
+                  num_ext: "123"
+                  num_int: ""
+                  colonia: "COLONIA"
+                  codigo_postal: "CP"
+                  pais: "PAIS"
+                  estado: "ESTADO"
+                  ciudad: "CIUDAD"
+                  telefono: "123456"
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      description: Elimina una dirección guardada en la página de SYSCOM
+      tags:
+        - Carrito
+      operationId: Eliminar una dirección
+      parameters:
+        - name: id
+          in: path
+          description: "ID de la dirección solicitada"
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Obtener el resultado de la eliminación
+          content:
+            aplication/json:
+              example:
+                - result: "true"
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /carrito/paises:
+    get:
+      description: Obtiene la lista de paises utilizados para una dirección
+      tags:
+        - Carrito
+      operationId: Obtener paises
+      responses:
+        '200':
+          description: Obtener la lista de los paises
+          content:
+            aplication/json:
+              example:
+                - paises: 
+                    - codigo: "AFG"
+                      id: "1"
+                      nombre: "Afganistán"
+                    - codigo: "ALB"
+                      id: "2"
+                      nombre: "Albania"
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /carrito/estados/{codigo_postal}:
+    get:
+      description: Obtiene obtiene el estado según el código postal
+      tags:
+        - Carrito
+      operationId: Obtener estados
+      parameters:
+        - name: codigo_postal
+          in: path
+          description: "Código postal de la zona"
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Obtener l
+          content:
+            aplication/json:
+              example:
+                - codigo_postal: "31000"
+                  municipio: "CHIHUAHUA"
+                  estado_sat: "CHIH"
+                  zona_extendida: "No"
+                  estado_nombre: "CHIHUAHUA"
+                  codigo_estado: "CHIH"
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /carrito/colonias/{codigo_postal}:
+    get:
+      description: Obtiene una lista de colonias utilizadas para una dirección
+      tags:
+        - Carrito
+      operationId: Obtener colonias
+      parameters:
+        - name: codigo_postal
+          in: path
+          description: "Código postal de la zona"
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Obtener una lista de colonias validas según el código postal
+          content:
+            aplication/json:
+              example:
+                - "CENTRO"
+                - "ZONA CENTRO"
+                - "SAN PEDRO"
+                - "SECTOR BOLíVAR"
+                - "PARQUE ROTARIO"
+                - "COLON"
+                - "EL BAJO"
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /carrito/pago:
+    get:
+      description: Obtiene la lista de metodos de pago disponibles
+      tags:
+        - Carrito
+      operationId: Obtener metodos de pago
+      responses:
+        '200':
+          description: Obtener lista de metodos de pago disponible
+          content:
+            aplication/json:
+              example:
+                - nombre: "Transferencia"
+                  metodo:
+                    - transferencia:
+                      - titulo: "Transferencia electrónica de fondos"
+                        codigo: "03"
+                        descuento: "4"
+                        tipo_cambio: "preferencial"
+                        plazo: 1
+                        forma:
+                          - pue: "1"
+                            ppd: "2"
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /carrito/fleteras:
+    get:
+      description: Obtiene una lista con las paqueterías disponibles
+      tags:
+        - Carrito
+      operationId: Obtener fleteras
+      responses:
+        '200':
+          description: Obtener una lista con los datos de las paqueterías disponibles
+          content:
+            aplication/json:
+              example:
+                - codigo: "estafeta"
+                  dia_siguiente: false
+                  nombre: "Estafeta"
+                - codigo: "estafeta_aereo"
+                  dia_siguiente: true
+                  nombre: "Estafeta día siguiente"
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /carrito/sucursales:
+    get:
+      description: Obtiene una lista con las sucursales disponibles
+      tags:
+        - Carrito
+      operationId: Obtener sucursales
+      responses:
+        '200':
+          description: Obtener una lista con las sucursales disponibles
+          content:
+            aplication/json:
+              example:
+                - nombre_sucursal: "Sucursal Cd. Juarez"
+                  calle: "Sor Juana Inés de la Cruz"
+                  num_ext: "169"
+                  num_int: ""
+                  codigo_postal: "32320"
+                  colonia: "San Lorenzo"
+                  estado: "Chihuahua"
+                  ciudad: "Juarez"
+                  pais: "México"
+                  telefono: "(656)625-9221"
+                  codigo: "cd_juarez"
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /carrito/cfdi:
+    get:
+      description: Obtiene la lista de CFDI permitidos para facturar
+      tags:
+        - Carrito
+      operationId: Obtener CFDI
+      responses:
+        '200':
+          description: Obtener la lista de CFDI usados para facturar
+          content:
+            aplication/json:
+              example:
+                - codigo: G01
+                  nombre: "Adquisición de mercancía"
+                - codigo: G03
+                  nombre: "Gastos en general"
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /wishlists:
+    get:
+      description: Devuelve un resumen de todas sus listas. Por cada lista se incluye nombre, ID y los IDs de los productos que contiene.
+      tags:
+        - Wishlist
+      operationId: Buscar todas las listas
+      responses:
+        '200':
+          description: Todas las listas
+          content:
+            application/json:
+              example:
+                - id: '44'
+                  nombre: lista de prueba
+                  producto_id:
+                  - '75173'
+                  - '87828'
+                  - '87829'
+                - id: '43'
+                  nombre: abcdefghij
+                  producto_id:
+                  - '75173'
+                  - '87828'
+                  - '87829'
+                - id: '36'
+                  nombre: Botones de pánico
+                  producto_id:
+                  - '20451'
+                  - '65339'
+                  - '66401'
+                  - '72642'
+                  - '80380'
+                  - '95528'
+                  - '95913'
+        default:
+            description: Error
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/Error'
+
+    post:
+      description: Crea una nueva lista de productos. Se debe incluír en la llamada el nombre de la lista y el listado de productos (mínimo 1 producto) a agregar en la lista.
+      operationId: Crear lista
+      tags:
+        - Wishlist
+      requestBody:
+        description: Objeto con nombre y productos de la lista
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ListaNueva'
+            example:
+              nombre: Nueva lista de prueba
+              productos:
+              - 87829
+              - 87828
+              - 75173
+      responses:
+        '201':
+          description: Detalle de categoría
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CategoríaDetalle'
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /wishlists/{id}:
+    get:
+      description: Devuelve la información detallada de una lista.
+      operationId: Buscar lista por ID
+      tags:
+        - Wishlist
+      parameters:
+        - name: ID
+          in: path
+          description: ID de la lista
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Detalle de la lista
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - id_lista
+                  - nombre
+                  - cantidad
+                  - productos
+                properties:
+                  id_lista:
+                    description: ID numérico.
+                    type: integer
+                  nombre:
+                    description: Nombre asignado a la lista.
+                    type: string
+                  cantidad:
+                    description: Cantidad de productos en la lista.
+                    type: integer
+                  productos:
+                    description: Detalles de los productos contenidos en la lista.
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Producto'
+              example:
+                id_lista: 4546
+                nombre: SHARE
+                cantidad: 3
+                productos: 
+                - 
+                  producto_id: 67172
+                  modelo: "SEC-1230UL"
+                  total_existencia: 153
+                  titulo: "Cargador de Batería Plomo Ácido 12 Volts, 30 Amps"
+                  marca: SAMLEX
+                  sat_key: 39121000
+                  img_portada: "https://ftp3.syscom.mx/usuarios/fotos/catalogo/SEC1230A/SEC1230Adet.jpg"
+                  categorias: 
+                  - 
+                    id: 2982
+                    nombre: Todos
+                  marca_logo: "https://ftp3.syscom.mx/usuarios/fotos/logotipos/samlex.png"
+                  link: "/producto/SEC-1230UL-SAMLEX-67172.html"
+                  iconos: 
+                  precios: 
+                  precio_especial: "1.00"
+                  precio_descuento: "1.00"
+                  precio_lista: "1.00"
+                - 
+                  producto_id: 73667
+                  modelo: "XT-100-C"
+                  total_existencia: 9
+                  titulo: "Torniquete Sencillo / Cuerpo Completo / Interior/Exterior / 100% Acero con Pintura Gris / EJE CENTRAL con Pintura Gris / Acabado de Lujo / Alto Tráfico"
+                  marca: "AccessPRO Industrial"
+                  sat_key: 46171619
+                  img_portada: "https://ftp3.syscom.mx/usuarios/fotos/BancoFotografiasSyscom/INDUSTRIALBYACCESSPRO/XT100C/XT100C-p.PNG"
+                  categorias: 
+                  - 
+                    id: 66062
+                    nombre: "Torniquetes de Cuerpo Completo"
+                  marca_logo: "https://ftp3.syscom.mx/usuarios/fotos/logotipos/accesspro_industrial.png"
+                  link: "/producto/XT-100-C-AccessPRO-Industrial-73667.html"
+                  iconos: 
+                  sup_der: "https://ftp3.syscom.mx/usuarios/fotos/3aosdegarantia.png"
+                  precios: 
+                  precio_especial: "1.00"
+                  precio_descuento: "1.00"
+                  precio_lista: "1.00"
+                - 
+                  producto_id: 160512
+                  modelo: 9565531
+                  total_existencia: 5
+                  titulo: "Lector para control de acceso Mobil o por tarjeta Serie MACE, Poderoso alcance por Bluetooth y con lector de codigos QR "
+                  marca: NEDAP
+                  sat_key: 46171619
+                  img_portada: "https://ftp3.syscom.mx/usuarios/fotos/BancoFotografiasSyscom/NEDAP/9565531/9565531-p.PNG"
+                  categorias: 
+                  - 
+                    id: 66135
+                    nombre: Bluetooth
+                  marca_logo: "https://ftp3.syscom.mx/usuarios/fotos/logotipos/nedap.png"
+                  link: "/producto/9565531-NEDAP-160512.html"
+                  iconos: 
+                  sup_der: "https://ftp3.syscom.mx/usuarios/fotos/bluetooth_1.png?v=1538154605"
+                  inf_der: "https://ftp3.syscom.mx/usuarios/fotos/qr.png"
+                  precios: 
+                  precio_especial: "1.00"
+                  precio_descuento: "1.00"
+                  precio_lista: "1.00"
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    
+    delete:
+      description: Eliminar una lista y sus productos.
+      operationId: Eliminar lista por ID
+      tags:
+        - Wishlist
+      parameters:
+        - name: ID
+          in: path
+          description: ID de la lista
+          required: true
+          schema:
+            type: integer
+      responses:
+        '204':
+          description: Lista eliminada correctamente.
+        default:
+          description: Ocurrió un error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /wishlists/{id}/productos/{productoId}:
+    post:
+      description: Agrega un producto a la lista.
+      operationId: Agregar producto a lista
+      tags:
+        - Wishlist
+      parameters:
+        - name: id
+          in: path
+          description: ID de la lista
+          required: true
+          schema:
+            type: integer
+        - name: productoId
+          in: path
+          description: ID del producto a agregar
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          content:
+            application/json:
+              example:
+                id_lista: '36'
+                nombre: Botones de pánico
+                cantidad: 7
+                productos:
+                - producto_id: '20451'
+                  modelo: KDP-601A1M/MS2D
+                  total_existencia: 806
+                  titulo: Kit de audio portero con un auricular (expandible hasta 3 auriculares)
+                  marca: KOCOM
+                  sat_key: '46171619'
+                  img_portada: https://ftp3.syscom.mx/usuarios/fotos/albums/CCTV/SYSCOM/KDP601A1M/KDP601A1Mdet.jpg
+                  categorías:
+                  - id: '1411'
+                    nombre: Interfones
+                  - id: '2775'
+                    nombre: Interfones
+                  marca_logo: https://ftp3.syscom.mx/usuarios/fotos/logotipos/kocom.png
+                  link: "/producto/KDP-601A1M-MS2D-KOCOM-20451.html"
+                  iconos: []
+                  precios:
+                    precio_especial: '10.00'
+                    precio_descuento: '10.00'
+                    precio_lista: '10.00'
+                - producto_id: '65339'
+                  modelo: E-400W
+                  total_existencia: 27
+                  titulo: Generador Eólico para aplicaciones marinas y terrestres 12 Vcd
+                  marca: SUNFORCE
+                  sat_key: '26111603'
+                  img_portada: https://ftp3.syscom.mx/usuarios/fotos/catalogo/E400W/E400Wdet.jpg
+                  categorías:
+                  - id: '2210'
+                    nombre: Generadores Eólicos
+                  - id: '2985'
+                    nombre: 'Generadores Eólicos '
+                  marca_logo: https://ftp3.syscom.mx/usuarios/fotos/logotipos/sunforce.png
+                  link: "/producto/E-400W-SUNFORCE-65339.html"
+                  iconos: []
+                  precios:
+                    precio_especial: '10.00'
+                    precio_descuento: '10.00'
+                    precio_lista: '10.00'
+                - producto_id: '66401'
+                  modelo: GAB-VID1
+                  total_existencia: 202
+                  titulo: Gabinete de Seguridad para DVR/NVR. Tamaño Chico (ver dimensiones de equipo
+                    compatible).
+                  marca: EPCOM INDUSTRIAL
+                  sat_key: '43223306'
+                  img_portada: https://ftp3.syscom.mx/usuarios/fotos/BancoFotografiasSYSCOM/EPCOMINDUSTRIAL/GABVID1/GABVID1-p.PNG
+                  categorías:
+                  - id: '1965'
+                    nombre: Gabinetes de Acero para DVR y NVR
+                  - id: '2439'
+                    nombre: Gabinetes para Videograbadoras
+                  - id: '2721'
+                    nombre: Gabinetes para Videograbadoras
+                  - id: '2732'
+                    nombre: Gabinetes para Videograbadoras
+                  - id: '2743'
+                    nombre: Gabinetes para Videograbadoras
+                  - id: '2754'
+                    nombre: Gabinetes para Videograbadoras
+                  - id: '2978'
+                    nombre: Gabinetes Uso Múltiple
+                  - id: '3030'
+                    nombre: Gabinetes
+                  - id: '3033'
+                    nombre: Gabinetes
+                  - id: '3036'
+                    nombre: Gabinetes
+                  - id: '65644'
+                    nombre: Gabinetes Uso Múltiple
+                  - id: '65651'
+                    nombre: Gabinetes Uso Múltiple
+                  marca_logo: https://ftp3.syscom.mx/usuarios/fotos/logotipos/epcom_industrial.png
+                  link: "/producto/GAB-VID1-EPCOM-INDUSTRIAL-66401.html"
+                  iconos: []
+                  precios:
+                    precio_especial: '10.00'
+                    precio_descuento: '10.00'
+                    precio_lista: '10.00'
+                - producto_id: '72642'
+                  modelo: B5C
+                  total_existencia: 358
+                  titulo: Backhaul punto-punto MIMO 4X4:4ac, 4900-6200 MHz, alta velocidad hasta 1.5
+                    Gbps, conectorizado
+                  marca: MIMOSA NETWORKS
+                  sat_key: '43222640'
+                  img_portada: https://ftp3.syscom.mx/usuarios/fotos/BancoFotografiasSYSCOM/MIMOSANETWORKS/B5C/B5C-p.PNG
+                  categorías:
+                  - id: '2920'
+                    nombre: 4.9 GHz
+                  - id: '2921'
+                    nombre: 5 GHz
+                  - id: '2922'
+                    nombre: 6 GHz en adelante
+                  - id: '65881'
+                    nombre: 5 GHz
+                  - id: '65884'
+                    nombre: Otras Bandas
+                  - id: '65885'
+                    nombre: Bandas 5 Ghz / 2.4 GHz
+                  - id: '65886'
+                    nombre: Otras Bandas
+                  marca_logo: https://ftp3.syscom.mx/usuarios/fotos/logotipos/mimosa_networks.png
+                  link: "/producto/B5C-MIMOSA-NETWORKS-72642.html"
+                  iconos: []
+                  precios:
+                    precio_especial: '10.00'
+                    precio_descuento: '10.00'
+                    precio_lista: '10.00'
+                - producto_id: '80380'
+                  modelo: SFX-01
+                  total_existencia: 64
+                  titulo: 'Botón de pánico AUTÓNOMO de 1 botón (no requiere panel) para linea telefónica '
+                  marca: S FIRE
+                  sat_key: '46171600'
+                  img_portada: https://ftp3.syscom.mx/usuarios/fotos/SFX01/SFX01.jpg
+                  categorías:
+                  - id: '2924'
+                    nombre: Todos
+                  - id: '3025'
+                    nombre: Botones de Pánico
+                  marca_logo: https://ftp3.syscom.mx/usuarios/fotos/logotipos/s_fire.png
+                  link: "/producto/SFX-01-S-FIRE-80380.html"
+                  iconos: []
+                  precios:
+                    precio_especial: '10.00'
+                    precio_descuento: '10.00'
+                    precio_lista: '10.00'
+                - producto_id: '95528'
+                  modelo: SS-2009-EM-ES
+                  total_existencia: 6
+                  titulo: Botón de Emergencia en Español, Color Rojo
+                  marca: STI
+                  sat_key: '39122216'
+                  img_portada: https://ftp3.syscom.mx/usuarios/fotos/BancoFotografiasSYSCOM/STI/SS2009EMES/SS2009EMES-p.png
+                  categorías:
+                  - id: '2884'
+                    nombre: Botones de Salida
+                  - id: '3025'
+                    nombre: Botones de Pánico
+                  - id: '65859'
+                    nombre: Accesorios
+                  marca_logo: https://ftp3.syscom.mx/usuarios/fotos/logotipos/sti.png
+                  link: "/producto/SS-2009-EM-ES-STI-95528.html"
+                  iconos: []
+                  precios:
+                    precio_especial: '10.00'
+                    precio_descuento: '10.00'
+                    precio_lista: '10.00'
+                - producto_id: '95913'
+                  modelo: DS-7608NI-K2/8P
+                  total_existencia: 695
+                  titulo: 'NVR de 8 Canales 4K / H.265+ H.265 / SWITCH POE 300 METROS / 2HDD@6TB /
+                    ONVIF / Hik-Connect P2P '
+                  marca: HIKVISION
+                  sat_key: '46171600'
+                  img_portada: https://ftp3.syscom.mx/usuarios/fotos/BancoFotografiasSYSCOM/HIKVISION/DS7608NIK28P/DS7608NIK28P-p.png
+                  categorías:
+                  - id: '1383'
+                    nombre: NVRs Network Video Recorders
+                  marca_logo: https://ftp3.syscom.mx/usuarios/fotos/logotipos/hikvision.png
+                  link: "/producto/DS-7608NI-K2-8P-HIKVISION-95913.html"
+                  iconos: []
+                  precios:
+                    precio_especial: '10.00'
+                    precio_descuento: '10.00'
+                    precio_lista: '10.00'
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      description: Elimina un producto a la lista.
+      operationId: Eliminar producto de lista
+      tags:
+        - Wishlist
+      parameters:
+        - name: ID
+          in: path
+          description: ID de la lista.
+          required: true
+          schema:
+            type: integer
+        - name: productoId
+          in: path
+          description: ID del producto a agregar.
+          required: true
+          schema:
+            type: integer
+      responses:
+        '204':
+          description: 'Eliminado exitosamente'
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /marcas:
+    get:
+      description: |
+        Devuelve el nombre e ID de todas las marcas disponibles.
+      operationId: Obtener todas las marcas
+      tags:
+        - Marcas
+      responses:
+        '200':
+          description: Lista de marcas y IDs
+          content:
+            application/json:
+              example:
+                - id: aea
+                  nombre: AEA
+                - id: airx
+                  nombre: AIRX
+                - id: alean
+                  nombre: ALEAN
+                - id: aleph
+                  nombre: ALEPH
+                - id: alfatronics
+                  nombre: ALFATRONICS
+                - id: alliedtelesis
+                  nombre: ALLIED TELESIS
+                - id: also
+                  nombre: ALSO
+                - id: altafidelidad
+                  nombre: ALTA FIDELIDAD
+                - id: altaitechnologies
+                  nombre: ALTAI TECHNOLOGIES
+                - id: altronix
+                  nombre: ALTRONIX
+                - id: alvarado
+                  nombre: ALVARADO
+                - id: alvarion
+                  nombre: ALVARION
+                - id: americanearthanchors
+                  nombre: AMERICAN EARTH ANCHORS
+                - id: amphenol
+                  nombre: AMPHENOL
+                - id: andrew
+                  nombre: ANDREW
+                - id: andrewcommscope
+                  nombre: ANDREW / COMMSCOPE
+                - id: andrewheliax
+                  nombre: ANDREW HELIAX
+                - id: antennaspecialists
+                  nombre: ANTENNA SPECIALISTS
+                - id: apacopto
+                  nombre: APAC OPTO
+                - id: apc
+                  nombre: APC
+                - id: apem
+                  nombre: APEM
+                - id: aplicacionestecnologicas
+                  nombre: APLICACIONES TECNOLOGICAS
+                - id: apower
+                  nombre: APOWER
+                - id: apple
+                  nombre: APPLE
+                - id: arecontvision
+                  nombre: ARECONT VISION
+                - id: arrow
+                  nombre: ARROW
+                - id: asahikenwood
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /marcas/{id}:
+    get:
+      operationId: Obtener una marca
+      tags:
+        - Marcas
+      description: |
+        Devuelve categorías, logo y descripción de una marca.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Marca'
+              example:
+                descripcion: "Ubiquiti Networks es el fabricante más importante de equipos para Enlaces
+                  Punto a Punto, Punto Multi-punto y Soluciones WIFI empresariales.\n\n"
+                titulo: Ubiquiti Networks
+                logo: https://ftp3.syscom.mx/usuarios/fotos/logotipos/ubiquiti_networks.png
+                categorías:
+                - nombre: Accesorios Generales
+                  id: '218'
+                  imagen: https://ftp3.syscom.mx/usuarios/fotos/catalogo/INS8023AFI/INS8023AFIdet.jpg
+                  cantidad: 3
+                - nombre: Antenas
+                  id: '338'
+                  imagen: https://ftp3.syscom.mx/usuarios/fotos/AP5AC90HD/AP5AC90HD.jpg
+                  cantidad: 43
+                - nombre: Antenas
+                  id: '283'
+                  imagen: https://ftp3.syscom.mx/usuarios/fotos/catalogo/RD5G34/RD5G34det.jpg
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /marcas/{id}/productos:
+    get:
+      operationId: Obtener productos de una marca
+      tags:
+        - Marcas
+      description: |
+        Devuelve categorías, logo y descripción de una marca.
+      parameters:
+        - name: categoria
+          in: query
+          description: ID de categoría o listado de IDs separados por comas ",".
+          schema:
+            type: string
+        - name: stock
+          in: query
+          schema:
+            type: boolean
+            default: 0
+        - name: agrupar
+          in: query
+          schema:
+            type: boolean
+            default: 0
+        - name: pagina
+          in: query
+          description: La página a buscar
+          schema:
+            type: integer
+            default: 1
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Búsqueda'
+              example:
+                cantidad: 1
+                pagina: 1
+                paginas: 1
+                productos:
+                - producto_id: '20451'
+                  modelo: KDP-601A1M/MS2D
+                  total_existencia: 806
+                  titulo: Kit de audio portero con un auricular (expandible hasta 3 auriculares)
+                  marca: KOCOM
+                  sat_key: '46171619'
+                  img_portada: https://ftp3.syscom.mx/usuarios/fotos/albums/CCTV/SYSCOM/KDP601A1M/KDP601A1Mdet.jpg
+                  categorías:
+                  - id: '1411'
+                    nombre: Interfones
+                  - id: '2775'
+                    nombre: Interfones
+                  marca_logo: https://ftp3.syscom.mx/usuarios/fotos/logotipos/kocom.png
+                  link: "/producto/KDP-601A1M-MS2D-KOCOM-20451.html"
+                  iconos: []
+                  precios:
+                    precio_especial: '10.00'
+                    precio_descuento: '10.00'
+                    precio_lista: '10.00'
+
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /facturas:
+    get:
+      description: |
+        Uno o más de los parámetros <span style="color:red">*anio*, *busqueda*</span> debe estar definido.
+      operationId: Búsqueda de Facturas
+      parameters:
+        - name: anio
+          in: query
+          required: true
+          description: Año de la búsqueda de las facturas en formato (yyyy) Ej. 2020
+          schema:
+            type: integer
+        - name: busqueda
+          in: query
+          description:  Filtro de búsqueda de facturas
+          schema:
+            type: string
+        - name: pagina
+          in: query
+          description: Página de busqueda de las facturas
+          schema:
+            type: integer
+      tags:
+        - Facturas  
+        
+  /facturas/{id}:
+    get:
+      description: |
+        Uno o más de los parámetros <span style="color:red">*id*</span> debe estar definido.
+      operationId: Detalle de Factura
+      parameters:
+        - name: id
+          in: query
+          required: true
+          description: Folio de la factura de carga (FA20/XXXXXX)
+          schema:
+            type: string
+      tags:
+        - Facturas   
+         
+  /productos:
+    get:
+      description: |
+        Uno o más de los parámetros <span style="color:red">*búsqueda*, *categorías*, *marcas*</span> debe estar definido.
+      operationId: Búsqueda de productos
+      parameters:
+        - name: categoria
+          in: query
+          required: true
+          description: ID de categoría o listado de IDs separados por comas ",".
+          schema:
+            type: string
+        - name: marca
+          in: query
+          required: true
+          description: ID de marcas o listado de marcas separados por comas ",".
+          schema:
+            type: string
+        - name: busqueda
+          in: query
+          required: true
+          description: Palabras clave de búsqueda separadas por el caracter "+".
+          schema:
+            type: string
+        - name: sucursal
+          in: query
+          description: ID de sucursal o listado de sucursales separadas por comas ",".
+          schema:
+            type: string
+        - name: orden
+          in: query
+          description: Orden en que se devolverá el listado, si se omite dirección se asume asc (precio = precio:asc).
+          schema:
+            type: string
+            default: relevancia
+            enum: [precio:asc, precio:desc, modelo:asc, modelo:desc, marca:asc, marca:desc, relevancia, topseller]
+        - name: stock
+          in: query
+          schema:
+            type: boolean
+            default: 0
+          allowEmptyValue: true
+        - name: agrupar
+          in: query
+          schema:
+            type: boolean
+            default: 0
+          allowEmptyValue: true
+        - name: pagina
+          in: query
+          description: La página a buscar.
+          schema:
+            type: integer
+            default: 1
+      tags:
+        - Productos
+  /productos/{id}:
+    get:
+      description: |
+        Devuelve la información y descripción de un producto.
+      operationId: Información de producto
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      tags:
+        - Productos
+      responses:
+        '200':
+          description: Detalles de producto.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductoDetalle'
+              
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /productos/{id}/relacionados:
+    get:
+      description: |
+        Devuelve los productos que se encontraron con los filtros aplicados.
+      operationId: Buscar productos relacionados
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      tags:
+        - Productos
+      responses:
+        '200':
+          description: Listado de productos relacionados.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Producto'
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /productos/{id}/accesorios:
+    get:
+      description: |
+        Devuelve los productos que se encontraron con los filtros aplicados.
+      operationId: Buscar accesorios de producto
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      tags:
+        - Productos
+      responses:
+        '200':
+          description: Listado de accesorios del producto.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Producto'
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /tipocambio:
+    get:
+      description: |
+        Devuelve tipo de cambio en USD o MXN.
+      operationId: Obtener tipo de cambio
+      tags:
+        - Utilidades
+      responses:
+        '200':
+          content:
+            application/json:
+              example:
+                normal: "1.00"
+                un_dia: "1.00"
+                una_semana: "1.00"
+                dos_semanas: "1.00"
+                tres_semanas: "1.00"
+                un_mes: "1.00"
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+components:
+  securitySchemes:
+    oauthsyscom:
+      type: oauth2
+      description: Esta API utiliza OAuth 2.0 con el flujo credenciales de cliente ([más información](https://developers.syscom.mx/guide)).
+      flows:
+        clientCredentials:
+          tokenUrl: https://developers.syscom.mx/oauth/token
+          refreshUrl: N/A
+          scopes: []
+
+    bearerAuth:
+      description: "Utilice su access token obtenido vía OAuth2 en los headers de todas sus peticiones: <code>Authorization: Bearer TU_ACCESS_TOKEN</code>"
+      type: http
+      scheme: bearer
+      bearerFormat: JWT  # optional, for documentation purposes only
+
+  schemas:
+    Categoría:
+      allOf:
+        - required:
+          - id
+          - nombre
+          - nivel
+          properties:
+            id:
+              type: integer
+              format: int64
+            nombre:
+              type: string
+            nivel:
+              type: integer
+              enum: [1, 2, 3]
+
+    CategoríaDetalle:
+      allOf:
+        - $ref: '#/components/schemas/Categoría'
+        - type: object
+          properties:
+            origen:
+              description: Listado de categorías de origen.
+              type: object
+            subcategorías:
+              description: Listado de subcategorías en las que se divide la categoría.
+              type: array
+              items:
+                $ref: '#/components/schemas/Categoría'
+
+    ListaNueva:
+      required:
+        - nombre
+        - productos
+      properties:
+        nombre:
+          type: string
+          minimum: 10
+          maximum: 255
+        productos:
+          type: array
+          items:
+            type: integer  
+          minimum: 1
+          
+    Producto:
+      required:
+        - producto_id
+        - modelo
+        - total_existencia
+      properties:
+        producto_id:
+          type: integer
+        modelo:
+          type: string
+        total_existencia:
+          type: integer
+        titulo:
+          type: string
+        marca:
+          type: string
+        sat_key:
+          type: string
+          description: Código SAT para el producto.
+        img_portada:
+          type: string
+          description: URL de imagen del producto.
+        categorías:
+          type: array
+          items:
+            $ref: '#/components/schemas/Categoría'
+        marca_logo:
+          type: string
+          description: URL de logo de la marca.
+        link:
+          type: string
+          description: Link del producto en SYSCOM.
+        precios:
+          type: object
+          description: El objecto incluye el precio de lista y precios con descuentos.
+          properties:
+            precio_lista:
+              type: number
+              format: float
+              description: Precio de lista del producto.
+            precio_especial:
+              type: number
+              format: float
+              description: Precio de promoción del producto.
+            precio_descuentos:
+              type: number
+              format: float
+              description: Su precio con descuentos.
+    ProductoCarrito:
+      required:
+        - id
+        - tipo
+        - cantidad
+      properties:
+        producto_id:
+          type: integer
+        tipo:
+          type: string
+          enum: [1, 2, 3]
+        cantidad:
+          type: integer
+    ProductoDetalle:
+      allOf:
+        - $ref: '#/components/schemas/Producto'
+        - type: object
+          properties:
+            existencia:
+              type: object
+              description: Detalle de existencias por sucursal SYSCOM.
+            iconos:
+              description: Íconos de características del producto.
+              type: object
+              properties:
+                inf_izq:
+                  description: Ícono esquina inferior izquierda.
+                  type: string
+                inf_der:
+                  description: Ícono esquina inferior derecha.
+                  type: string
+                sup_izq:
+                  description: Ícono esquina superior izquierda.
+                  type: string
+                sup_der:
+                  description: Ícono esquina superior derecha.
+                  type: string
+            caracteristicas:
+              description: Características destacadas del producto.
+              type: array
+              items:
+                type: string
+            imagenes:
+              description: Imágenes adicionales del producto.
+              type: array
+              items:
+                type: object
+                properties:
+                  orden:
+                    type: integer
+                    description: Orden sugerido de la imagen.
+                  url:
+                    type: string
+                    description: URL de la imagen.
+            descripcion:
+              type: string
+              description: Descripción del producto.
+            recursos:
+              description: Recursos y manuales del producto.
+              type: array
+              items:
+                type: object
+                properties:
+                  recurso:
+                    description: Nombre del recurso.
+                    type: string
+                  path:
+                    description: URL de descarga del recurso.
+                    type: string
+
+    Búsqueda:
+      required:
+        - cantidad
+        - pagina
+        - paginas
+      properties:
+        cantidad:
+          description: Cantidad de productos encontrados.
+          type: integer
+        pagina:
+          type: integer
+          description: Página actual del listado
+        paginas:
+          type: integer
+          description: Total de páginas de 60 productos encontradas.
+        productos:
+          description: Productos encontrados página actual.
+          type: array
+          items:
+            $ref: '#/components/schemas/Producto'
+            
+    Marca:
+      required:
+        - categorias
+        - logo
+      properties:
+        logo:
+          type: string
+          description: URL del logo
+        titulo:
+          type: string
+        descripcion: 
+          type: string
+          description: Descripción de la marca.
+        categorias:
+          type: array
+          items:
+            type: object
+            properties:
+              nombre:
+                type: string
+              id:
+                type: integer
+              imagen:
+                description: URL de imagen
+                type: string
+              cantidad:
+                type: integer
+                description: Cantidad de productos de la marca.
+    
+    Error:
+      required:
+        - code
+        - title
+        - detail
+        - status
+      properties:
+        code:
+          type: integer
+          format: int32
+        title:
+          type: string
+        detail:
+          type: string
+        status:
+          type: integer
+        source:
+          type: object
+
+security:
+  - bearerAuth: []
