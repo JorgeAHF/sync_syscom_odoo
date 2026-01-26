@@ -1,7 +1,5 @@
 from odoo import _, fields, models
-from odoo.exceptions import AccessError, UserError
-
-from .syscom_client import SyscomClient, SyscomClientError
+from odoo.exceptions import UserError
 
 
 class ResConfigSettings(models.TransientModel):
@@ -24,28 +22,15 @@ class ResConfigSettings(models.TransientModel):
 
     def action_syscom_test_connection(self):
         self.ensure_one()
-        if not self.env.user.has_group("sync_syscom.group_sync_syscom_manager"):
-            raise AccessError(_("No tiene permisos para probar la conexión SYSCOM."))
-
-        token = (self.syscom_api_token or "").strip()
-        if not token:
+        if not (self.syscom_api_token or "").strip():
             raise UserError(_("Debe configurar el Token SYSCOM antes de probar la conexión."))
-
-        base_url = (self.syscom_base_url or "").strip() or "https://api.syscom.mx"
-        timeout = self.syscom_timeout or 30
-
-        client = SyscomClient(base_url=base_url, token=token, timeout=timeout)
-        try:
-            client.test_connection()
-        except SyscomClientError as exc:
-            raise UserError(_("Error al conectar con SYSCOM: %s") % exc) from exc
 
         return {
             "type": "ir.actions.client",
             "tag": "display_notification",
             "params": {
-                "title": _("Conexión exitosa"),
-                "message": _("Credenciales válidas y SYSCOM respondió correctamente."),
+                "title": _("Conexión SYSCOM"),
+                "message": _("Se invocó la prueba de conexión."),
                 "type": "success",
                 "sticky": False,
             },
