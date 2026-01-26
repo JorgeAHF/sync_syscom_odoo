@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+        <record id="group_sync_syscom_manager" model="res.groups">
+            <field name="name">Sync Syscom Manager</field>
+        </record>
+    </data>
+</odoo>
