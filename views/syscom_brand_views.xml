@@ -28,7 +28,7 @@
             <field name="name">sync.syscom.brand.list</field>
             <field name="model">sync.syscom.brand</field>
             <field name="arch" type="xml">
-                <list string="Marcas SYSCOM">
+                <list string="Marcas SYSCOM" editable="bottom">
                     <header>
                         <button
                             name="%(server_action_sync_syscom_models_selected)d"

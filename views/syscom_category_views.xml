@@ -16,7 +16,7 @@
             <field name="name">sync.syscom.category.list</field>
             <field name="model">sync.syscom.category</field>
             <field name="arch" type="xml">
-                <list string="Categorías SYSCOM">
+                <list string="Categorías SYSCOM" editable="bottom">
                     <header>
                         <button
                             name="%(server_action_sync_syscom_category)d"
