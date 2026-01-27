@@ -46,43 +46,74 @@ class SyscomCategory(models.Model):
         data_map = {}
         parent_map = {}
 
-        def add_category(payload, parent_syscom_id=None):
+        def parse_level(value, fallback):
+            try:
+                lvl = int(value)
+                return lvl if lvl > 0 else fallback
+            except Exception:
+                return fallback
+
+        def add_category(payload, parent_syscom_id=None, level_hint=None):
             if not isinstance(payload, dict):
-                return
+                return None
             syscom_id = str(payload.get("id") or "").strip()
             if not syscom_id:
-                return
+                return None
+            level_val = parse_level(payload.get("nivel"), level_hint)
             data_map[syscom_id] = {
                 "syscom_id": syscom_id,
                 "name": payload.get("nombre") or syscom_id,
-                "level": int(payload.get("nivel") or 0) or False,
+                "level": level_val,
                 "active": True,
             }
             if parent_syscom_id:
                 parent_map[syscom_id] = str(parent_syscom_id)
+            return syscom_id, level_val
 
+        queue = []
         for category in categories:
-            add_category(category)
-            category_id = category.get("id")
-            if not category_id:
+            item = add_category(category, level_hint=1)
+            if item:
+                queue.append(item)
+
+        visited = set()
+        # Recursivo hasta 3 niveles usando detalle de cada categoría
+        while queue:
+            current_syscom_id, current_level = queue.pop(0)
+            if current_syscom_id in visited:
                 continue
-            detail = client.get_category_detail(category_id) or {}
+            visited.add(current_syscom_id)
+
+            if current_level and current_level >= 3:
+                continue
+
+            detail = client.get_category_detail(current_syscom_id) or {}
             origin_entries = detail.get("origen")
             parent_origin_id = None
             if isinstance(origin_entries, list) and origin_entries:
                 parent_origin_id = origin_entries[0].get("id")
             elif isinstance(origin_entries, dict):
                 parent_origin_id = origin_entries.get("id")
-            add_category(detail, parent_syscom_id=parent_origin_id)
 
-            if isinstance(origin_entries, list):
-                for origin in origin_entries:
-                    add_category(origin)
-            elif isinstance(origin_entries, dict):
-                add_category(origin_entries)
+            add_category(detail, parent_syscom_id=parent_origin_id, level_hint=current_level or 1)
 
-            for subcategory in detail.get("subcategorías") or detail.get("subcategorias") or []:
-                add_category(subcategory, parent_syscom_id=detail.get("id"))
+            def iter_entries(entries):
+                if isinstance(entries, list):
+                    for entry in entries:
+                        yield entry
+                elif isinstance(entries, dict):
+                    yield entries
+
+            for origin in iter_entries(origin_entries):
+                item = add_category(origin, level_hint=current_level - 1 if current_level else None)
+                if item and (item[1] or 0) < 3:
+                    queue.append((item[0], item[1] or (current_level or 1)))
+
+            subcats = detail.get("subcategorías") or detail.get("subcategorias") or []
+            for subcat in iter_entries(subcats):
+                item = add_category(subcat, parent_syscom_id=detail.get("id"), level_hint=(current_level or 1) + 1)
+                if item and (item[1] or 0) < 3:
+                    queue.append((item[0], item[1] or ((current_level or 1) + 1)))
 
         created = 0
         updated = 0
