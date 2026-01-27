@@ -36,6 +36,112 @@ class SyscomBrand(models.Model):
     def _get_selected_categories(self):
         return self.env["sync.syscom.category"].search([("selected", "=", True)])
 
+    def action_sync_all_brands_batch(self):
+        """Sincroniza marcas en lotes, usando offset persistido para evitar timeouts."""
+        params = self.env["ir.config_parameter"].sudo()
+        token = (params.get_param("sync_syscom.syscom_api_token") or "").strip()
+        if not token:
+            raise UserError(_("Configura el token en Ajustes antes de sincronizar."))
+
+        base_url = params.get_param("sync_syscom.syscom_base_url") or "https://developers.syscom.mx/api/v1"
+        timeout = int(params.get_param("sync_syscom.syscom_timeout") or 30)
+        detail_timeout = int(params.get_param("sync_syscom.brand_detail_timeout") or 3)
+        chunk_limit = int(params.get_param("sync_syscom.brand_detail_chunk_limit") or 10)
+        client = SyscomClient(base_url=base_url, token=token, timeout=timeout)
+
+        brands = client.get_brands() or []
+        total = len(brands)
+        offset = int(params.get_param("sync_syscom.brand_sync_offset") or 0)
+        if offset >= total:
+            offset = 0
+
+        slice_brands = brands[offset : offset + chunk_limit]
+        processed = 0
+        created = updated = timeout_skip = 0
+
+        for brand in slice_brands:
+            syscom_id = str(brand.get("id") or "").strip()
+            if not syscom_id:
+                offset += 1
+                continue
+            try:
+                detail = client.get_brand_detail(syscom_id, timeout=detail_timeout) or {}
+            except UserError:
+                timeout_skip += 1
+                offset += 1
+                continue
+
+            categories = detail.get("categorías") or detail.get("categorias") or []
+            cat_ids = []
+            for category in categories:
+                cat_syscom_id = str(category.get("id") or "").strip()
+                if not cat_syscom_id:
+                    continue
+                cat_record = self.env["sync.syscom.category"].search(
+                    [("syscom_id", "=", cat_syscom_id)],
+                    limit=1,
+                )
+                if cat_record:
+                    cat_ids.append(cat_record.id)
+
+            vals = {
+                "syscom_id": syscom_id,
+                "name": detail.get("titulo") or brand.get("nombre") or syscom_id,
+                "title": detail.get("titulo") or brand.get("nombre") or "",
+                "description": detail.get("descripcion") or "",
+                "logo_url": detail.get("logo") or "",
+                "active": True,
+            }
+            record = self.search([("syscom_id", "=", syscom_id)], limit=1)
+            if record:
+                record.write(vals)
+                updated += 1
+            else:
+                record = self.create(vals)
+                created += 1
+
+            if cat_ids:
+                record.category_ids = [(6, 0, cat_ids)]
+
+            processed += 1
+            offset += 1
+
+        # Persist new offset
+        if offset >= total:
+            offset = 0
+        params.set_param("sync_syscom.brand_sync_offset", offset)
+
+        self.env["sync.syscom.log"].create({
+            "name": _("Sincronización de marcas (lotes)"),
+            "kind": "info",
+            "message": _("Marcas procesadas: %(p)s (creadas %(c)s, actualizadas %(u)s, timeout %(t)s). Quedan: %(r)s")
+            % {
+                "p": processed,
+                "c": created,
+                "u": updated,
+                "t": timeout_skip,
+                "r": max(total - offset, 0) if processed else max(total - offset, 0),
+            },
+        })
+
+        return {
+            "type": "ir.actions.client",
+            "tag": "display_notification",
+            "params": {
+                "title": _("Sync SYSCOM"),
+                "message": _("Marcas procesadas: %(p)s (creadas %(c)s, actualizadas %(u)s, timeout %(t)s). Pendientes aprox: %(r)s.")
+                % {
+                    "p": processed,
+                    "c": created,
+                    "u": updated,
+                    "t": timeout_skip,
+                    "r": max(total - offset, 0),
+                },
+                "type": "success",
+                "sticky": False,
+            },
+        }
+
     def action_sync_models_selected(self):
         """Sincroniza modelos de marcas seleccionadas y categorías seleccionadas."""
         params = self.env["ir.config_parameter"].sudo()
