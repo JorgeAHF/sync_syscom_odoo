@@ -210,14 +210,20 @@ class SyscomCategory(models.Model):
 
         base_url = params.get_param("sync_syscom.syscom_base_url") or "https://developers.syscom.mx/api/v1"
         timeout = int(params.get_param("sync_syscom.syscom_timeout") or 30)
+        chunk_limit = int(params.get_param("sync_syscom.brand_chunk_limit") or 50)
         client = SyscomClient(base_url=base_url, token=token, timeout=timeout)
 
         brands = client.get_brands() or []
         kept = 0
         skipped = 0
         skipped_timeout = 0
+        processed = 0
+        remaining = 0
 
         for brand in brands:
+            if processed >= chunk_limit:
+                remaining += 1
+                continue
             syscom_id = str(brand.get("id") or "").strip()
             if not syscom_id:
                 continue
@@ -268,12 +274,13 @@ class SyscomCategory(models.Model):
                 brand_record = self.env["sync.syscom.brand"].create(brand_vals)
             brand_record.category_ids = [(6, 0, cat_ids)]
             kept += 1
+            processed += 1
 
         self.env["sync.syscom.log"].create({
             "name": _("Sincronización de marcas (categorías seleccionadas)"),
             "kind": "info",
-            "message": _("Marcas vinculadas: %(kept)s, omitidas por categoría: %(skipped)s, omitidas por timeout: %(t)s")
-            % {"kept": kept, "skipped": skipped, "t": skipped_timeout},
+            "message": _("Marcas vinculadas: %(kept)s, omitidas por categoría: %(skipped)s, timeout: %(t)s, procesadas en este lote: %(p)s, restantes estimadas: %(r)s")
+            % {"kept": kept, "skipped": skipped, "t": skipped_timeout, "p": processed, "r": remaining},
         })
 
         return {
@@ -281,8 +288,8 @@ class SyscomCategory(models.Model):
             "tag": "display_notification",
             "params": {
                 "title": _("Sync SYSCOM"),
-                "message": _("Marcas sincronizadas: %(kept)s (omitidas categoría: %(skipped)s, timeout: %(t)s).")
-                % {"kept": kept, "skipped": skipped, "t": skipped_timeout},
+                "message": _("Marcas sincronizadas: %(kept)s (omitidas categoría: %(skipped)s, timeout: %(t)s). Lote procesado: %(p)s, restantes estimadas: %(r)s.")
+                % {"kept": kept, "skipped": skipped, "t": skipped_timeout, "p": processed, "r": remaining},
                 "type": "success",
                 "sticky": False,
             },
