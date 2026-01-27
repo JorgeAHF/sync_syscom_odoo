@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+        <record id="view_sync_syscom_brand_tree" model="ir.ui.view">
+            <field name="name">sync.syscom.brand.tree</field>
+            <field name="model">sync.syscom.brand</field>
+            <field name="arch" type="xml">
+                <tree string="Marcas SYSCOM">
+                    <header>
+                        <button
+                            name="action_sync_syscom"
+                            type="object"
+                            string="Sincronizar desde SYSCOM"
+                            class="btn-primary"
+                            groups="sync_syscom.group_sync_syscom_manager"
+                        />
+                    </header>
+                    <field name="name"/>
+                    <field name="syscom_id"/>
+                    <field name="title"/>
+                    <field name="active"/>
+                </tree>
+            </field>
+        </record>
+
+        <record id="view_sync_syscom_brand_form" model="ir.ui.view">
+            <field name="name">sync.syscom.brand.form</field>
+            <field name="model">sync.syscom.brand</field>
+            <field name="arch" type="xml">
+                <form string="Marca SYSCOM">
+                    <sheet>
+                        <group>
+                            <field name="name"/>
+                            <field name="syscom_id"/>
+                            <field name="title"/>
+                            <field name="logo_url"/>
+                            <field name="active"/>
+                        </group>
+                        <group>
+                            <field name="description"/>
+                        </group>
+                        <notebook>
+                            <page string="Categorías">
+                                <field name="category_ids" widget="many2many_tags"/>
+                            </page>
+                        </notebook>
+                    </sheet>
+                </form>
+            </field>
+        </record>
+
+        <record id="action_sync_syscom_brand" model="ir.actions.act_window">
+            <field name="name">Marcas SYSCOM</field>
+            <field name="res_model">sync.syscom.brand</field>
+            <field name="view_mode">tree,form</field>
+            <field name="help" type="html">
+                <p class="o_view_nocontent_smiling_face">Sincroniza marcas desde SYSCOM.</p>
+            </field>
+        </record>
+    </data>
+</odoo>

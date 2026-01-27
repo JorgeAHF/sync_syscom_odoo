@@ -1,1 +1,4 @@
 id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_sync_syscom_category_manager,access.sync.syscom.category.manager,model_sync_syscom_category,sync_syscom.group_sync_syscom_manager,1,1,1,1
+access_sync_syscom_brand_manager,access.sync.syscom.brand.manager,model_sync_syscom_brand,sync_syscom.group_sync_syscom_manager,1,1,1,1
+access_sync_syscom_log_manager,access.sync.syscom.log.manager,model_sync_syscom_log,sync_syscom.group_sync_syscom_manager,1,1,1,1
