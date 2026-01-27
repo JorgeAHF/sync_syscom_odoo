@@ -2,5 +2,32 @@
 <odoo>
     <data>
         <menuitem id="menu_sync_syscom_root" name="SyncSyscom" groups="sync_syscom.group_sync_syscom_manager"/>
+        <menuitem
+            id="menu_sync_syscom_catalogs"
+            name="Catálogos"
+            parent="menu_sync_syscom_root"
+            groups="sync_syscom.group_sync_syscom_manager"
+        />
+        <menuitem
+            id="menu_sync_syscom_categories"
+            name="Categorías"
+            parent="menu_sync_syscom_catalogs"
+            action="action_sync_syscom_category"
+            groups="sync_syscom.group_sync_syscom_manager"
+        />
+        <menuitem
+            id="menu_sync_syscom_brands"
+            name="Marcas"
+            parent="menu_sync_syscom_catalogs"
+            action="action_sync_syscom_brand"
+            groups="sync_syscom.group_sync_syscom_manager"
+        />
+        <menuitem
+            id="menu_sync_syscom_logs"
+            name="Logs"
+            parent="menu_sync_syscom_root"
+            action="action_sync_syscom_log"
+            groups="sync_syscom.group_sync_syscom_manager"
+        />
     </data>
 </odoo>

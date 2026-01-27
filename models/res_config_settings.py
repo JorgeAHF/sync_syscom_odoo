@@ -13,7 +13,7 @@ class ResConfigSettings(models.TransientModel):
     )
     syscom_base_url = fields.Char(
         string="Base URL API",
-        default="https://api.syscom.mx",
+        default="https://developers.syscom.mx/api/v1",
         config_parameter="sync_syscom.syscom_base_url",
     )
     syscom_timeout = fields.Integer(
@@ -29,7 +29,7 @@ class ResConfigSettings(models.TransientModel):
         if not token:
             raise UserError(_("Debe configurar el Token SYSCOM antes de probar la conexión."))
 
-        base_url = params.get_param("sync_syscom.syscom_base_url") or "https://api.syscom.mx"
+        base_url = params.get_param("sync_syscom.syscom_base_url") or "https://developers.syscom.mx/api/v1"
         timeout = int(params.get_param("sync_syscom.syscom_timeout") or 30)
         client = SyscomClient(base_url=base_url, token=token, timeout=timeout)
         ok, message = client.ping()

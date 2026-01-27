@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+        <record id="view_sync_syscom_category_tree" model="ir.ui.view">
+            <field name="name">sync.syscom.category.tree</field>
+            <field name="model">sync.syscom.category</field>
+            <field name="arch" type="xml">
+                <tree string="Categorías SYSCOM">
+                    <header>
+                        <button
+                            name="action_sync_syscom"
+                            type="object"
+                            string="Sincronizar desde SYSCOM"
+                            class="btn-primary"
+                            groups="sync_syscom.group_sync_syscom_manager"
+                        />
+                    </header>
+                    <field name="name"/>
+                    <field name="syscom_id"/>
+                    <field name="level"/>
+                    <field name="parent_id"/>
+                    <field name="active"/>
+                </tree>
+            </field>
+        </record>
+
+        <record id="view_sync_syscom_category_form" model="ir.ui.view">
+            <field name="name">sync.syscom.category.form</field>
+            <field name="model">sync.syscom.category</field>
+            <field name="arch" type="xml">
+                <form string="Categoría SYSCOM">
+                    <sheet>
+                        <group>
+                            <field name="name"/>
+                            <field name="syscom_id"/>
+                            <field name="level"/>
+                            <field name="parent_id"/>
+                            <field name="active"/>
+                        </group>
+                        <notebook>
+                            <page string="Subcategorías">
+                                <field name="child_ids">
+                                    <tree>
+                                        <field name="name"/>
+                                        <field name="syscom_id"/>
+                                        <field name="level"/>
+                                        <field name="active"/>
+                                    </tree>
+                                </field>
+                            </page>
+                        </notebook>
+                    </sheet>
+                </form>
+            </field>
+        </record>
+
+        <record id="action_sync_syscom_category" model="ir.actions.act_window">
+            <field name="name">Categorías SYSCOM</field>
+            <field name="res_model">sync.syscom.category</field>
+            <field name="view_mode">tree,form</field>
+            <field name="help" type="html">
+                <p class="o_view_nocontent_smiling_face">Sincroniza categorías desde SYSCOM.</p>
+            </field>
+        </record>
+    </data>
+</odoo>
