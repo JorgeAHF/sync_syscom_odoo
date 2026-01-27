@@ -36,6 +36,17 @@ class SyscomBrand(models.Model):
     def _get_selected_categories(self):
         return self.env["sync.syscom.category"].search([("selected", "=", True)])
 
+    def cron_sync_all_brands_batch(self):
+        """Ejecutado por cron: procesa un lote; se desactiva solo al completar todas las marcas."""
+        self.action_sync_all_brands_batch()
+        # Si el offset volvió a cero, ya dimos la vuelta completa: desactivar el cron
+        params = self.env["ir.config_parameter"].sudo()
+        offset = int(params.get_param("sync_syscom.brand_sync_offset") or 0)
+        if offset == 0:
+            cron = self.env.ref("sync_syscom.cron_sync_syscom_brands_full", raise_if_not_found=False)
+            if cron:
+                cron.active = False
+
     def action_sync_all_brands_batch(self):
         """Sincroniza marcas en lotes, usando offset persistido para evitar timeouts."""
         params = self.env["ir.config_parameter"].sudo()

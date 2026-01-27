@@ -299,5 +299,20 @@ class SyscomCategory(models.Model):
         """Sincroniza categorías y todas las marcas (detalle) en una sola acción."""
         # Primero categorías
         self.action_sync_syscom()
-        # Luego todas las marcas con detalle
-        return self.env["sync.syscom.brand"].action_sync_all_brands_full()
+        # Resetear offset y activar cron para procesar todas las marcas en background
+        params = self.env["ir.config_parameter"].sudo()
+        params.set_param("sync_syscom.brand_sync_offset", 0)
+        cron = self.env.ref("sync_syscom.cron_sync_syscom_brands_full", raise_if_not_found=False)
+        if cron:
+            cron.active = True
+            cron.nextcall = fields.Datetime.now()
+        return {
+            "type": "ir.actions.client",
+            "tag": "display_notification",
+            "params": {
+                "title": _("Sync SYSCOM"),
+                "message": _("Categorías sincronizadas. Sincronización de marcas en proceso (background)."),
+                "type": "success",
+                "sticky": False,
+            },
+        }
