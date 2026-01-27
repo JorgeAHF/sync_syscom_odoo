@@ -58,5 +58,18 @@
                 <p class="o_view_nocontent_smiling_face">Sincroniza marcas desde SYSCOM.</p>
             </field>
         </record>
+
+        <!-- Acción en menú "Acción" del formulario/lista -->
+        <record id="server_action_sync_syscom_brand" model="ir.actions.server">
+            <field name="name">Sincronizar desde SYSCOM</field>
+            <field name="model_id" ref="model_sync_syscom_brand"/>
+            <field name="binding_model_id" ref="model_sync_syscom_brand"/>
+            <field name="binding_type">action</field>
+            <field name="state">code</field>
+            <field name="code">
+                action = env["sync.syscom.brand"].action_sync_syscom()
+            </field>
+            <field name="groups_id" eval="[(4, ref('sync_syscom.group_sync_syscom_manager'))]"/>
+        </record>
     </data>
 </odoo>
