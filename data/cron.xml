@@ -10,5 +10,14 @@
             <field name="interval_type">minutes</field>
             <field name="active">False</field>
         </record>
+        <record id="cron_sync_syscom_categories" model="ir.cron">
+            <field name="name">Sync Syscom: categorías (background)</field>
+            <field name="model_id" ref="model_sync_syscom_category"/>
+            <field name="state">code</field>
+            <field name="code">model.cron_sync_categories()</field>
+            <field name="interval_number">1</field>
+            <field name="interval_type">minutes</field>
+            <field name="active">False</field>
+        </record>
     </data>
 </odoo>
