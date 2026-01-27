@@ -27,8 +27,8 @@ class SyscomClient:
     def get_brands(self):
         return self._request("GET", "/marcas")
 
-    def get_brand_detail(self, brand_id):
-        return self._request("GET", f"/marcas/{brand_id}")
+    def get_brand_detail(self, brand_id, timeout=None):
+        return self._request("GET", f"/marcas/{brand_id}", timeout_override=timeout)
 
     def get_brand_products(self, brand_id):
         return self._request("GET", f"/marcas/{brand_id}/productos")
@@ -36,18 +36,19 @@ class SyscomClient:
     def get_product_detail(self, product_id):
         return self._request("GET", f"/productos/{product_id}")
 
-    def _request(self, method, endpoint):
+    def _request(self, method, endpoint, timeout_override=None):
         url = f"{self.base_url}/{endpoint.lstrip('/')}"
         headers = {
             "Authorization": f"Bearer {self.token}",
             "Accept": "application/json",
         }
+        timeout_value = timeout_override or self.timeout or 30
         try:
             response = requests.request(
                 method,
                 url,
                 headers=headers,
-                timeout=self.timeout,
+                timeout=(timeout_value, timeout_value),
             )
         except requests.exceptions.Timeout as exc:
             raise UserError(_("Timeout al conectar con SYSCOM")) from exc

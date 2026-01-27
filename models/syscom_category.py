@@ -215,6 +215,7 @@ class SyscomCategory(models.Model):
         brands = client.get_brands() or []
         kept = 0
         skipped = 0
+        skipped_timeout = 0
 
         for brand in brands:
             syscom_id = str(brand.get("id") or "").strip()
@@ -224,8 +225,12 @@ class SyscomCategory(models.Model):
             categories = brand.get("categorías") or brand.get("categorias") or []
             detail = None
             if not categories:
-                detail = client.get_brand_detail(syscom_id) or {}
-                categories = detail.get("categorías") or detail.get("categorias") or []
+                try:
+                    detail = client.get_brand_detail(syscom_id, timeout=10) or {}
+                    categories = detail.get("categorías") or detail.get("categorias") or []
+                except UserError:
+                    skipped_timeout += 1
+                    continue
 
             cat_ids = []
             for category in categories:
@@ -241,7 +246,11 @@ class SyscomCategory(models.Model):
                 continue
 
             if detail is None:
-                detail = client.get_brand_detail(syscom_id) or {}
+                try:
+                    detail = client.get_brand_detail(syscom_id, timeout=10) or {}
+                except UserError:
+                    skipped_timeout += 1
+                    continue
 
             brand_vals = {
                 "syscom_id": syscom_id,
@@ -263,8 +272,8 @@ class SyscomCategory(models.Model):
         self.env["sync.syscom.log"].create({
             "name": _("Sincronización de marcas (categorías seleccionadas)"),
             "kind": "info",
-            "message": _("Marcas vinculadas: %(kept)s, omitidas por categoría: %(skipped)s")
-            % {"kept": kept, "skipped": skipped},
+            "message": _("Marcas vinculadas: %(kept)s, omitidas por categoría: %(skipped)s, omitidas por timeout: %(t)s")
+            % {"kept": kept, "skipped": skipped, "t": skipped_timeout},
         })
 
         return {
@@ -272,8 +281,8 @@ class SyscomCategory(models.Model):
             "tag": "display_notification",
             "params": {
                 "title": _("Sync SYSCOM"),
-                "message": _("Marcas sincronizadas: %(kept)s (omitidas: %(skipped)s).")
-                % {"kept": kept, "skipped": skipped},
+                "message": _("Marcas sincronizadas: %(kept)s (omitidas categoría: %(skipped)s, timeout: %(t)s).")
+                % {"kept": kept, "skipped": skipped, "t": skipped_timeout},
                 "type": "success",
                 "sticky": False,
             },
