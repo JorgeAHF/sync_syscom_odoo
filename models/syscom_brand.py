@@ -25,9 +25,10 @@ class SyscomBrand(models.Model):
         string="Categorías",
     )
 
-    _sql_constraints = [
-        ("syscom_id_unique", "unique(syscom_id)", "El ID SYSCOM debe ser único."),
-    ]
+    _syscom_id_unique = models.Constraint(
+        "UNIQUE(syscom_id)",
+        "El ID SYSCOM debe ser único.",
+    )
 
     def action_sync_syscom(self):
         params = self.env["ir.config_parameter"].sudo()

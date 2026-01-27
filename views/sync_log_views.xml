@@ -2,15 +2,15 @@
 <odoo>
     <data>
         <record id="view_sync_syscom_log_tree" model="ir.ui.view">
-            <field name="name">sync.syscom.log.tree</field>
+            <field name="name">sync.syscom.log.list</field>
             <field name="model">sync.syscom.log</field>
             <field name="arch" type="xml">
-                <tree string="Logs SYSCOM">
+                <list string="Logs SYSCOM">
                     <field name="create_date"/>
                     <field name="name"/>
                     <field name="kind"/>
                     <field name="message"/>
-                </tree>
+                </list>
             </field>
         </record>
 
@@ -36,7 +36,7 @@
         <record id="action_sync_syscom_log" model="ir.actions.act_window">
             <field name="name">Logs SYSCOM</field>
             <field name="res_model">sync.syscom.log</field>
-            <field name="view_mode">tree,form</field>
+            <field name="view_mode">list,form</field>
         </record>
     </data>
 </odoo>
