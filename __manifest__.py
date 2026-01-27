@@ -16,5 +16,6 @@
         "views/menu.xml",
     ],
     "installable": True,
-    "application": False,
+    "application": True,
+    "images": ["static/description/icon.png"],
 }
