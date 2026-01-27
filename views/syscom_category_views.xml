@@ -22,14 +22,14 @@
                             name="%(server_action_sync_syscom_category)d"
                             type="action"
                             string="Sincronizar desde SYSCOM"
-                            class="btn-primary"
+                            class="btn-secondary"
                             groups="sync_syscom.group_sync_syscom_manager"
                         />
                         <button
-                            name="%(server_action_sync_brands_selected)d"
+                            name="%(server_action_sync_cat_brand)d"
                             type="action"
-                            string="Sincronizar marcas de seleccionadas"
-                            class="btn-secondary"
+                            string="Sincronizar categorías + marcas (completo)"
+                            class="btn-primary"
                             groups="sync_syscom.group_sync_syscom_manager"
                         />
                     </header>

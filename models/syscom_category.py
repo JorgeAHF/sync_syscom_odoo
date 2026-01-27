@@ -296,8 +296,8 @@ class SyscomCategory(models.Model):
         }
 
     def action_sync_categories_and_brands(self):
-        """Sincroniza categorías y un lote de marcas (detalle) en una sola acción."""
+        """Sincroniza categorías y todas las marcas (detalle) en una sola acción."""
         # Primero categorías
         self.action_sync_syscom()
-        # Luego marcas en lote
-        return self.env["sync.syscom.brand"].action_sync_all_brands_batch()
+        # Luego todas las marcas con detalle
+        return self.env["sync.syscom.brand"].action_sync_all_brands_full()
