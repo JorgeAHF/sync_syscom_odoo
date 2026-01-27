@@ -30,6 +30,12 @@ class SyscomClient:
     def get_brand_detail(self, brand_id):
         return self._request("GET", f"/marcas/{brand_id}")
 
+    def get_brand_products(self, brand_id):
+        return self._request("GET", f"/marcas/{brand_id}/productos")
+
+    def get_product_detail(self, product_id):
+        return self._request("GET", f"/productos/{product_id}")
+
     def _request(self, method, endpoint):
         url = f"{self.base_url}/{endpoint.lstrip('/')}"
         headers = {

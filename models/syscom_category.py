@@ -33,7 +33,14 @@ class SyscomCategory(models.Model):
         string="Marcas",
     )
     selected = fields.Boolean(string="Sel", default=False)
-    model_names = fields.Char(string="Modelos")
+    product_ids = fields.Many2many(
+        "sync.syscom.product",
+        "sync_syscom_category_product_rel",
+        "category_id",
+        "product_id",
+        string="Modelos",
+    )
+    model_names = fields.Char(string="Modelos", compute="_compute_model_names", store=False)
     level1_name = fields.Char(string="Nivel 1", compute="_compute_level_names", store=True)
     level2_name = fields.Char(string="Nivel 2", compute="_compute_level_names", store=True)
     level3_name = fields.Char(string="Nivel 3", compute="_compute_level_names", store=True)
@@ -57,6 +64,12 @@ class SyscomCategory(models.Model):
             record.level1_name = names[0]
             record.level2_name = names[1]
             record.level3_name = names[2]
+
+    @api.depends("product_ids.model")
+    def _compute_model_names(self):
+        for record in self:
+            models = [m for m in record.product_ids.mapped("model") if m]
+            record.model_names = ", ".join(sorted(set(models))) if models else False
 
     def action_sync_syscom(self):
         params = self.env["ir.config_parameter"].sudo()
@@ -178,6 +191,81 @@ class SyscomCategory(models.Model):
                 "title": _("Sync SYSCOM"),
                 "message": _("Sincronización completada. Creadas: %(created)s, actualizadas: %(updated)s.")
                 % {"created": created, "updated": updated},
+                "type": "success",
+                "sticky": False,
+            },
+        }
+
+    def action_sync_brands_from_selected(self):
+        params = self.env["ir.config_parameter"].sudo()
+        token = (params.get_param("sync_syscom.syscom_api_token") or "").strip()
+        if not token:
+            raise UserError(_("Configura el token en Ajustes antes de sincronizar."))
+
+        selected_categories = self.search([("selected", "=", True)])
+        if not selected_categories:
+            raise UserError(_("Marca al menos una categoría (columna Sel) antes de sincronizar marcas."))
+
+        selected_syscom_ids = set(selected_categories.mapped("syscom_id"))
+
+        base_url = params.get_param("sync_syscom.syscom_base_url") or "https://developers.syscom.mx/api/v1"
+        timeout = int(params.get_param("sync_syscom.syscom_timeout") or 30)
+        client = SyscomClient(base_url=base_url, token=token, timeout=timeout)
+
+        brands = client.get_brands() or []
+        kept = 0
+        skipped = 0
+
+        for brand in brands:
+            syscom_id = str(brand.get("id") or "").strip()
+            if not syscom_id:
+                continue
+            detail = client.get_brand_detail(syscom_id) or {}
+            categories = detail.get("categorías") or detail.get("categorias") or []
+            cat_ids = []
+            for category in categories:
+                cat_syscom_id = str(category.get("id") or "").strip()
+                if not cat_syscom_id:
+                    continue
+                if cat_syscom_id in selected_syscom_ids:
+                    cat_record = self.search([("syscom_id", "=", cat_syscom_id)], limit=1)
+                    if cat_record:
+                        cat_ids.append(cat_record.id)
+            if not cat_ids:
+                skipped += 1
+                continue
+
+            brand_vals = {
+                "syscom_id": syscom_id,
+                "name": detail.get("titulo") or brand.get("nombre") or syscom_id,
+                "title": detail.get("titulo") or "",
+                "description": detail.get("descripcion") or "",
+                "logo_url": detail.get("logo") or "",
+                "active": True,
+                "selected": True,
+            }
+            brand_record = self.env["sync.syscom.brand"].search([("syscom_id", "=", syscom_id)], limit=1)
+            if brand_record:
+                brand_record.write(brand_vals)
+            else:
+                brand_record = self.env["sync.syscom.brand"].create(brand_vals)
+            brand_record.category_ids = [(6, 0, cat_ids)]
+            kept += 1
+
+        self.env["sync.syscom.log"].create({
+            "name": _("Sincronización de marcas (categorías seleccionadas)"),
+            "kind": "info",
+            "message": _("Marcas vinculadas: %(kept)s, omitidas por categoría: %(skipped)s")
+            % {"kept": kept, "skipped": skipped},
+        })
+
+        return {
+            "type": "ir.actions.client",
+            "tag": "display_notification",
+            "params": {
+                "title": _("Sync SYSCOM"),
+                "message": _("Marcas sincronizadas: %(kept)s (omitidas: %(skipped)s).")
+                % {"kept": kept, "skipped": skipped},
                 "type": "success",
                 "sticky": False,
             },

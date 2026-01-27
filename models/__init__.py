@@ -3,3 +3,4 @@ from . import syscom_client
 from . import sync_log
 from . import syscom_category
 from . import syscom_brand
+from . import syscom_product

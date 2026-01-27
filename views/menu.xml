@@ -29,6 +29,13 @@
             groups="sync_syscom.group_sync_syscom_manager"
         />
         <menuitem
+            id="menu_sync_syscom_sync_products"
+            name="Modelos"
+            parent="menu_sync_syscom_sync"
+            action="server_action_sync_syscom_models_selected"
+            groups="sync_syscom.group_sync_syscom_manager"
+        />
+        <menuitem
             id="menu_sync_syscom_categories"
             name="Categorías"
             parent="menu_sync_syscom_catalogs"
@@ -40,6 +47,13 @@
             name="Marcas"
             parent="menu_sync_syscom_catalogs"
             action="action_sync_syscom_brand"
+            groups="sync_syscom.group_sync_syscom_manager"
+        />
+        <menuitem
+            id="menu_sync_syscom_products"
+            name="Modelos"
+            parent="menu_sync_syscom_catalogs"
+            action="action_sync_syscom_product"
             groups="sync_syscom.group_sync_syscom_manager"
         />
         <menuitem

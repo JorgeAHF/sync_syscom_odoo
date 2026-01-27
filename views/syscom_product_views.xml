@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+        <record id="view_sync_syscom_product_tree" model="ir.ui.view">
+            <field name="name">sync.syscom.product.list</field>
+            <field name="model">sync.syscom.product</field>
+            <field name="arch" type="xml">
+                <list string="Modelos SYSCOM">
+                    <header>
+                        <button
+                            name="%(server_action_publish_syscom_products)d"
+                            type="action"
+                            string="Publicar productos seleccionados"
+                            class="btn-primary"
+                            groups="sync_syscom.group_sync_syscom_manager"
+                        />
+                    </header>
+                    <field name="selected"/>
+                    <field name="name"/>
+                    <field name="model"/>
+                    <field name="brand_id"/>
+                    <field name="category_ids" widget="many2many_tags"/>
+                    <field name="price_list"/>
+                    <field name="price_special"/>
+                    <field name="price_discounts"/>
+                    <field name="active"/>
+                </list>
+            </field>
+        </record>
+
+        <record id="view_sync_syscom_product_form" model="ir.ui.view">
+            <field name="name">sync.syscom.product.form</field>
+            <field name="model">sync.syscom.product</field>
+            <field name="arch" type="xml">
+                <form string="Modelo SYSCOM">
+                    <sheet>
+                        <group>
+                            <field name="selected"/>
+                            <field name="name"/>
+                            <field name="model"/>
+                            <field name="syscom_id"/>
+                            <field name="brand_id"/>
+                            <field name="category_ids" widget="many2many_tags"/>
+                            <field name="active"/>
+                        </group>
+                        <group>
+                            <field name="price_list"/>
+                            <field name="price_special"/>
+                            <field name="price_discounts"/>
+                            <field name="currency"/>
+                            <field name="link"/>
+                        </group>
+                        <group>
+                            <field name="description"/>
+                            <field name="image_url"/>
+                        </group>
+                        <group>
+                            <field name="payload"/>
+                        </group>
+                    </sheet>
+                </form>
+            </field>
+        </record>
+
+        <record id="action_sync_syscom_product" model="ir.actions.act_window">
+            <field name="name">Modelos SYSCOM</field>
+            <field name="res_model">sync.syscom.product</field>
+            <field name="view_mode">list,form</field>
+        </record>
+
+        <record id="server_action_publish_syscom_products" model="ir.actions.server">
+            <field name="name">Publicar productos seleccionados</field>
+            <field name="model_id" ref="model_sync_syscom_product"/>
+            <field name="binding_model_id" ref="model_sync_syscom_product"/>
+            <field name="binding_type">action</field>
+            <field name="state">code</field>
+            <field name="code">
+                action = env["sync.syscom.product"].action_publish_selected()
+            </field>
+        </record>
+    </data>
+</odoo>

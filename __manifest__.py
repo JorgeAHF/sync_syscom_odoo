@@ -12,6 +12,7 @@
         "views/res_config_settings_view.xml",
         "views/syscom_category_views.xml",
         "views/syscom_brand_views.xml",
+        "views/syscom_product_views.xml",
         "views/sync_log_views.xml",
         "views/menu.xml",
     ],
