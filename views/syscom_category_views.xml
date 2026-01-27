@@ -5,7 +5,7 @@
             <field name="name">sync.syscom.category.list</field>
             <field name="model">sync.syscom.category</field>
             <field name="arch" type="xml">
-                <list string="Categorías SYSCOM">
+                <list string="Categorías SYSCOM" hierarchy="parent_id" default_order="level">
                     <header>
                         <button
                             name="%(server_action_sync_syscom_category)d"
@@ -15,11 +15,12 @@
                             groups="sync_syscom.group_sync_syscom_manager"
                         />
                     </header>
-                    <field name="name"/>
-                    <field name="syscom_id"/>
-                    <field name="level"/>
-                    <field name="parent_id"/>
-                    <field name="active"/>
+                    <field name="level1_name" string="Nivel 1" readonly="1"/>
+                    <field name="level2_name" string="Nivel 2" readonly="1"/>
+                    <field name="level3_name" string="Nivel 3" readonly="1"/>
+                    <field name="selected"/>
+                    <field name="brand_ids" widget="many2many_tags"/>
+                    <field name="model_names"/>
                 </list>
             </field>
         </record>

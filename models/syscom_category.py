@@ -1,6 +1,6 @@
 import time
 
-from odoo import _, fields, models
+from odoo import _, api, fields, models
 from odoo.exceptions import UserError
 
 from .syscom_client import SyscomClient
@@ -25,11 +25,38 @@ class SyscomCategory(models.Model):
         "parent_id",
         string="Subcategorías",
     )
+    brand_ids = fields.Many2many(
+        "sync.syscom.brand",
+        "sync_syscom_brand_category_rel",
+        "category_id",
+        "brand_id",
+        string="Marcas",
+    )
+    selected = fields.Boolean(string="Sel", default=False)
+    model_names = fields.Char(string="Modelos")
+    level1_name = fields.Char(string="Nivel 1", compute="_compute_level_names", store=True)
+    level2_name = fields.Char(string="Nivel 2", compute="_compute_level_names", store=True)
+    level3_name = fields.Char(string="Nivel 3", compute="_compute_level_names", store=True)
 
     _syscom_id_unique = models.Constraint(
         "UNIQUE(syscom_id)",
         "El ID SYSCOM debe ser único.",
     )
+
+    @api.depends("name", "level", "parent_id")
+    def _compute_level_names(self):
+        for record in self:
+            names = [None, None, None]
+            current = record
+            # Walk up the tree to root, fill from level index-1
+            while current:
+                lvl = int(current.level or 0)
+                idx = min(max(lvl, 1), 3) - 1
+                names[idx] = current.name
+                current = current.parent_id
+            record.level1_name = names[0]
+            record.level2_name = names[1]
+            record.level3_name = names[2]
 
     def action_sync_syscom(self):
         params = self.env["ir.config_parameter"].sudo()
