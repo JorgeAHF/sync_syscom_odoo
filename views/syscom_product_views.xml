@@ -1,6 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
     <data>
+        <!-- Server action declared before being referenced -->
+        <record id="server_action_publish_syscom_products" model="ir.actions.server">
+            <field name="name">Publicar productos seleccionados</field>
+            <field name="model_id" ref="model_sync_syscom_product"/>
+            <field name="binding_model_id" ref="model_sync_syscom_product"/>
+            <field name="binding_type">action</field>
+            <field name="state">code</field>
+            <field name="code">
+                action = env["sync.syscom.product"].action_publish_selected()
+            </field>
+        </record>
+
         <record id="view_sync_syscom_product_tree" model="ir.ui.view">
             <field name="name">sync.syscom.product.list</field>
             <field name="model">sync.syscom.product</field>
@@ -66,17 +78,6 @@
             <field name="name">Modelos SYSCOM</field>
             <field name="res_model">sync.syscom.product</field>
             <field name="view_mode">list,form</field>
-        </record>
-
-        <record id="server_action_publish_syscom_products" model="ir.actions.server">
-            <field name="name">Publicar productos seleccionados</field>
-            <field name="model_id" ref="model_sync_syscom_product"/>
-            <field name="binding_model_id" ref="model_sync_syscom_product"/>
-            <field name="binding_type">action</field>
-            <field name="state">code</field>
-            <field name="code">
-                action = env["sync.syscom.product"].action_publish_selected()
-            </field>
         </record>
     </data>
 </odoo>
