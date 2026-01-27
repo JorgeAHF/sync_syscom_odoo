@@ -38,7 +38,7 @@ class SyscomCategory(models.Model):
         "sync_syscom_category_product_rel",
         "category_id",
         "product_id",
-        string="Modelos",
+        string="Modelos vinculados",
     )
     model_names = fields.Char(string="Modelos", compute="_compute_model_names", store=False)
     level1_name = fields.Char(string="Nivel 1", compute="_compute_level_names", store=True)
