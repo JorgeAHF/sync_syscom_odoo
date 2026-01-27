@@ -74,7 +74,6 @@
             <field name="code">
                 action = env["sync.syscom.category"].action_sync_syscom()
             </field>
-            <field name="groups_id" eval="[(4, ref('sync_syscom.group_sync_syscom_manager'))]"/>
         </record>
     </data>
 </odoo>
