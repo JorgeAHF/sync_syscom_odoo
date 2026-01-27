@@ -8,8 +8,8 @@
                 <list string="Categorías SYSCOM">
                     <header>
                         <button
-                            name="action_sync_syscom"
-                            type="object"
+                            name="%(server_action_sync_syscom_category)d"
+                            type="action"
                             string="Sincronizar desde SYSCOM"
                             class="btn-primary"
                             groups="sync_syscom.group_sync_syscom_manager"
