@@ -220,8 +220,13 @@ class SyscomCategory(models.Model):
             syscom_id = str(brand.get("id") or "").strip()
             if not syscom_id:
                 continue
-            detail = client.get_brand_detail(syscom_id) or {}
-            categories = detail.get("categorías") or detail.get("categorias") or []
+            # Intentar usar categorías del listado para evitar muchas llamadas de detalle
+            categories = brand.get("categorías") or brand.get("categorias") or []
+            detail = None
+            if not categories:
+                detail = client.get_brand_detail(syscom_id) or {}
+                categories = detail.get("categorías") or detail.get("categorias") or []
+
             cat_ids = []
             for category in categories:
                 cat_syscom_id = str(category.get("id") or "").strip()
@@ -235,10 +240,13 @@ class SyscomCategory(models.Model):
                 skipped += 1
                 continue
 
+            if detail is None:
+                detail = client.get_brand_detail(syscom_id) or {}
+
             brand_vals = {
                 "syscom_id": syscom_id,
                 "name": detail.get("titulo") or brand.get("nombre") or syscom_id,
-                "title": detail.get("titulo") or "",
+                "title": detail.get("titulo") or brand.get("nombre") or "",
                 "description": detail.get("descripcion") or "",
                 "logo_url": detail.get("logo") or "",
                 "active": True,
