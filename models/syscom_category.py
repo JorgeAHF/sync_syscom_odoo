@@ -381,4 +381,13 @@ class SyscomCategory(models.Model):
         if cron_cat:
             cron_cat.active = True
             cron_cat.nextcall = fields.Datetime.now()
-        return True
+        return {
+            "type": "ir.actions.client",
+            "tag": "display_notification",
+            "params": {
+                "title": _("Sync SYSCOM"),
+                "message": _("Sincronización en segundo plano iniciada (categorías → marcas → productos)."),
+                "type": "success",
+                "sticky": False,
+            },
+        }

@@ -72,7 +72,16 @@ class SyscomBrand(models.Model):
         if cron_brand:
             cron_brand.active = True
             cron_brand.nextcall = fields.Datetime.now()
-        return True
+        return {
+            "type": "ir.actions.client",
+            "tag": "display_notification",
+            "params": {
+                "title": _("Sync SYSCOM"),
+                "message": _("Sincronización de marcas y productos iniciada en segundo plano."),
+                "type": "success",
+                "sticky": False,
+            },
+        }
 
     def _fetch_all_brand_products(self, client, brand_syscom_id, stock=None, timeout=None, page_limit=200):
         """
