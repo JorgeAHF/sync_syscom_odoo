@@ -12,6 +12,7 @@ class SyscomBrand(models.Model):
     _name = "sync.syscom.brand"
     _description = "Marca SYSCOM"
     _order = "name"
+    _rec_name = "syscom_id"
 
     name = fields.Char(string="Nombre", required=True)
     syscom_id = fields.Char(string="ID SYSCOM", required=True, index=True)
