@@ -102,6 +102,14 @@
             <field name="model">sync.syscom.brand</field>
             <field name="arch" type="xml">
                 <kanban create="false" class="o_kanban_small_column">
+                    <field name="logo_url"/>
+                    <field name="title"/>
+                    <field name="name"/>
+                    <field name="syscom_id"/>
+                    <field name="category_count"/>
+                    <field name="selected"/>
+                    <field name="active"/>
+                    <field name="description"/>
                     <templates>
                         <t t-name="kanban-box">
                             <t t-call="sync_syscom.sync_syscom_brand_card"/>
