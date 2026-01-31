@@ -47,9 +47,18 @@ class SyscomBrand(models.Model):
             record.category_count = len(record.category_ids)
 
     def name_get(self):
+        """
+        Permite mostrar el ID SYSCOM cuando se pasa el contexto
+        {'sync_syscom_show_id': True} (usado en los tags de categorías).
+        En otros casos sigue mostrando el nombre/título habitual.
+        """
         result = []
+        show_id = self.env.context.get("sync_syscom_show_id")
         for record in self:
-            display = record.syscom_id or record.name or _("Sin ID")
+            if show_id:
+                display = record.syscom_id or record.name or _("Sin ID")
+            else:
+                display = record.name or record.title or record.syscom_id or _("Sin nombre")
             result.append((record.id, display))
         return result
 
