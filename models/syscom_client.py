@@ -30,8 +30,14 @@ class SyscomClient:
     def get_brand_detail(self, brand_id, timeout=None):
         return self._request("GET", f"/marcas/{brand_id}", timeout_override=timeout)
 
-    def get_brand_products(self, brand_id):
-        return self._request("GET", f"/marcas/{brand_id}/productos")
+    def get_brand_products(self, brand_id, page=1, stock=None):
+        params = []
+        if stock is not None:
+            params.append(f"stock={int(bool(stock))}")
+        if page and page > 1:
+            params.append(f"pagina={page}")
+        query = f"?{'&'.join(params)}" if params else ""
+        return self._request("GET", f"/marcas/{brand_id}/productos{query}")
 
     def get_product_detail(self, product_id):
         return self._request("GET", f"/productos/{product_id}")

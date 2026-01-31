@@ -58,6 +58,30 @@ class SyscomBrand(models.Model):
     def _get_selected_categories(self):
         return self.env["sync.syscom.category"].search([("selected", "=", True)])
 
+    def _fetch_all_brand_products(self, client, brand_syscom_id, stock=None, timeout=None, page_limit=200):
+        """
+        Itera paginando /marcas/{id}/productos hasta que no haya resultados o se alcance page_limit.
+        Devuelve lista acumulada.
+        """
+        all_products = []
+        page = 1
+        while page <= page_limit:
+            products = client.get_brand_products(brand_syscom_id, page=page, stock=stock)
+            if not products:
+                break
+            # Algunas respuestas vienen con dict {productos: [...]} si agrupar; contemplamos lista directa.
+            if isinstance(products, dict) and "productos" in products:
+                batch = products.get("productos") or []
+            else:
+                batch = products or []
+            if not batch:
+                break
+            all_products.extend(batch)
+            if len(batch) < 60:  # heurística: SYSCOM suele paginar a 60
+                break
+            page += 1
+        return all_products
+
     def cron_sync_all_brands_batch(self):
         """Ejecutado por cron: procesa un lote; se desactiva solo al completar todas las marcas."""
         self.action_sync_all_brands_batch()
@@ -136,6 +160,40 @@ class SyscomBrand(models.Model):
             if cat_ids:
                 record.category_ids = [(6, 0, cat_ids)]
 
+            # Crear/actualizar stubs de productos (sin detalle) para catálogo
+            for product in products or []:
+                prod_syscom_id = str(product.get("producto_id") or product.get("id") or "").strip()
+                if not prod_syscom_id:
+                    continue
+                prod_vals = {
+                    "syscom_id": prod_syscom_id,
+                    "model": product.get("modelo") or prod_syscom_id,
+                    "name": product.get("titulo") or product.get("modelo") or prod_syscom_id,
+                    "active": True,
+                    "brand_id": record.id,
+                }
+                prod_record = self.env["sync.syscom.product"].search(
+                    [("syscom_id", "=", prod_syscom_id)],
+                    limit=1,
+                )
+                if prod_record:
+                    prod_record.write(prod_vals)
+                else:
+                    prod_record = self.env["sync.syscom.product"].create(prod_vals)
+                prod_cat_ids = []
+                for cat in product.get("categorías") or product.get("categorias") or []:
+                    cat_syscom_id = str(cat.get("id") or "").strip()
+                    if not cat_syscom_id:
+                        continue
+                    cat_record = self.env["sync.syscom.category"].search(
+                        [("syscom_id", "=", cat_syscom_id)],
+                        limit=1,
+                    )
+                    if cat_record:
+                        prod_cat_ids.append(cat_record.id)
+                if prod_cat_ids:
+                    prod_record.category_ids = [(6, 0, prod_cat_ids)]
+
             processed += 1
             offset += 1
 
@@ -200,6 +258,13 @@ class SyscomBrand(models.Model):
                 timeout_skip += 1
                 continue
 
+            # Recoger productos para obtener categorías nivel 3 también
+            products = self._fetch_all_brand_products(
+                client,
+                syscom_id,
+                stock=params.get_param("sync_syscom.brand_products_stock"),
+            )
+
             categories = detail.get("categorías") or detail.get("categorias") or []
             cat_ids = []
             for category in categories:
@@ -212,6 +277,19 @@ class SyscomBrand(models.Model):
                 )
                 if cat_record:
                     cat_ids.append(cat_record.id)
+
+            # Complementar con categorías derivadas de los productos (niveles 2/3)
+            for product in products or []:
+                for cat in product.get("categorías") or product.get("categorias") or []:
+                    cat_syscom_id = str(cat.get("id") or "").strip()
+                    if not cat_syscom_id:
+                        continue
+                    cat_record = self.env["sync.syscom.category"].search(
+                        [("syscom_id", "=", cat_syscom_id)],
+                        limit=1,
+                    )
+                    if cat_record and cat_record.id not in cat_ids:
+                        cat_ids.append(cat_record.id)
 
             vals = {
                 "syscom_id": syscom_id,
@@ -232,6 +310,40 @@ class SyscomBrand(models.Model):
 
             if cat_ids:
                 record.category_ids = [(6, 0, cat_ids)]
+
+            # Crear/actualizar stubs de productos (sin detalle) para catálogo
+            for product in products or []:
+                prod_syscom_id = str(product.get("producto_id") or product.get("id") or "").strip()
+                if not prod_syscom_id:
+                    continue
+                prod_vals = {
+                    "syscom_id": prod_syscom_id,
+                    "model": product.get("modelo") or prod_syscom_id,
+                    "name": product.get("titulo") or product.get("modelo") or prod_syscom_id,
+                    "active": True,
+                    "brand_id": record.id,
+                }
+                prod_record = self.env["sync.syscom.product"].search(
+                    [("syscom_id", "=", prod_syscom_id)],
+                    limit=1,
+                )
+                if prod_record:
+                    prod_record.write(prod_vals)
+                else:
+                    prod_record = self.env["sync.syscom.product"].create(prod_vals)
+                prod_cat_ids = []
+                for cat in product.get("categorías") or product.get("categorias") or []:
+                    cat_syscom_id = str(cat.get("id") or "").strip()
+                    if not cat_syscom_id:
+                        continue
+                    cat_record = self.env["sync.syscom.category"].search(
+                        [("syscom_id", "=", cat_syscom_id)],
+                        limit=1,
+                    )
+                    if cat_record:
+                        prod_cat_ids.append(cat_record.id)
+                if prod_cat_ids:
+                    prod_record.category_ids = [(6, 0, prod_cat_ids)]
 
         self.env["sync.syscom.log"].create({
             "name": _("Sincronización de marcas (completa)"),
@@ -276,7 +388,11 @@ class SyscomBrand(models.Model):
         category_product_links = defaultdict(list)
 
         for brand in brands:
-            products = client.get_brand_products(brand.syscom_id) or []
+            products = self._fetch_all_brand_products(
+                client,
+                brand.syscom_id,
+                stock=params.get_param("sync_syscom.brand_products_stock"),
+            ) or []
             for product in products:
                 prod_syscom_id = str(product.get("producto_id") or product.get("id") or "").strip()
                 if not prod_syscom_id:
@@ -360,7 +476,11 @@ class SyscomBrand(models.Model):
         category_product_links = defaultdict(list)
 
         for brand in self:
-            products = client.get_brand_products(brand.syscom_id) or []
+            products = self._fetch_all_brand_products(
+                client,
+                brand.syscom_id,
+                stock=params.get_param("sync_syscom.brand_products_stock"),
+            ) or []
             for product in products:
                 prod_syscom_id = str(product.get("producto_id") or product.get("id") or "").strip()
                 if not prod_syscom_id:
