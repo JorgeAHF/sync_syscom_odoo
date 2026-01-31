@@ -9,15 +9,7 @@
             <field name="binding_type">action</field>
             <field name="state">code</field>
             <field name="code">
-params = env["ir.config_parameter"].sudo()
-params.set_param("sync_syscom.brand_sync_offset", 0)
-params.set_param("sync_syscom.brand_products_sync_offset", 0)
-cron_brand = env.ref("sync_syscom.cron_sync_syscom_brands_full", raise_if_not_found=False)
-cron_prod = env.ref("sync_syscom.cron_sync_syscom_brand_products", raise_if_not_found=False)
-if cron_prod:
-    cron_prod.active = False
-if cron_brand:
-    cron_brand.active = True
+env["sync.syscom.brand"].action_start_brand_sync()
             </field>
         </record>
 

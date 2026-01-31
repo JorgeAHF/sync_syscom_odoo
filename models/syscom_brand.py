@@ -58,6 +58,22 @@ class SyscomBrand(models.Model):
     def _get_selected_categories(self):
         return self.env["sync.syscom.category"].search([("selected", "=", True)])
 
+    def action_start_brand_sync(self):
+        """Reinicia offsets de marcas/productos y arranca la cron de marcas en background."""
+        params = self.env["ir.config_parameter"].sudo()
+        params.set_param("sync_syscom.brand_sync_offset", 0)
+        params.set_param("sync_syscom.brand_products_sync_offset", 0)
+
+        cron_brand = self.env.ref("sync_syscom.cron_sync_syscom_brands_full", raise_if_not_found=False)
+        cron_prod = self.env.ref("sync_syscom.cron_sync_syscom_brand_products", raise_if_not_found=False)
+        for cron in (cron_brand, cron_prod):
+            if cron:
+                cron.active = False
+        if cron_brand:
+            cron_brand.active = True
+            cron_brand.nextcall = fields.Datetime.now()
+        return True
+
     def _fetch_all_brand_products(self, client, brand_syscom_id, stock=None, timeout=None, page_limit=200):
         """
         Itera paginando /marcas/{id}/productos hasta que no haya resultados o se alcance page_limit.
