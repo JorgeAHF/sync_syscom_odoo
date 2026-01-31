@@ -37,7 +37,7 @@
                     <field name="level2_name" string="Nivel 2" readonly="1"/>
                     <field name="level3_name" string="Nivel 3" readonly="1"/>
                     <field name="selected"/>
-                    <field name="brand_ids_tree" widget="many2many_tags" context="{'sync_syscom_show_id': True}"/>
+                    <field name="brand_ids_tree" string="Marcas heredadas" widget="many2many_tags" context="{'sync_syscom_show_id': True}"/>
                     <field name="model_names"/>
                 </list>
             </field>
@@ -57,8 +57,8 @@
                             <field name="active"/>
                         </group>
                         <group string="Marcas">
-                            <field name="brand_ids" widget="many2many_tags" context="{'sync_syscom_show_id': True}"/>
-                            <field name="brand_ids_tree" widget="many2many_tags" context="{'sync_syscom_show_id': True}" readonly="1"/>
+                            <field name="brand_ids" string="Marcas directas" widget="many2many_tags" context="{'sync_syscom_show_id': True}"/>
+                            <field name="brand_ids_tree" string="Marcas heredadas" widget="many2many_tags" context="{'sync_syscom_show_id': True}" readonly="1"/>
                         </group>
                         <notebook>
                             <page string="Subcategorías">

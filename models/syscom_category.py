@@ -31,6 +31,7 @@ class SyscomCategory(models.Model):
         "category_id",
         "brand_id",
         string="Marcas",
+        help="Vínculos directos devueltos por SYSCOM en /marcas/{id}.",
     )
     selected = fields.Boolean(string="Sel", default=False)
     product_ids = fields.Many2many(
@@ -43,8 +44,9 @@ class SyscomCategory(models.Model):
     brand_ids_tree = fields.Many2many(
         "sync.syscom.brand",
         compute="_compute_brand_ids_tree",
-        string="Marcas (árbol)",
+        string="Marcas heredadas",
         store=False,
+        help="Marcas directas de la categoría y de todas sus descendientes (solo visual).",
     )
     model_names = fields.Char(string="Modelos", compute="_compute_model_names", store=False)
     level1_name = fields.Char(string="Nivel 1", compute="_compute_level_names", store=True)
