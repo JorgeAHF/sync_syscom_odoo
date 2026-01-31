@@ -28,29 +28,29 @@
             <field name="name">sync.syscom.brand.list</field>
             <field name="model">sync.syscom.brand</field>
             <field name="arch" type="xml">
-                <list string="Marcas SYSCOM" editable="bottom">
+                <tree string="Marcas SYSCOM" create="false" class="o_list_optional">
                     <header>
                         <button
                             name="%(server_action_sync_syscom_models_selected)d"
                             type="action"
-                            string="Sincronizar modelos de marcas seleccionadas"
+                            string="Sincronizar modelos seleccionados"
                             class="btn-secondary"
                             groups="sync_syscom.group_sync_syscom_manager"
                         />
                         <button
                             name="%(server_action_sync_syscom_brand)d"
                             type="action"
-                            string="Sincronizar desde SYSCOM"
+                            string="Sincronizar todas las marcas"
                             class="btn-primary"
                             groups="sync_syscom.group_sync_syscom_manager"
                         />
                     </header>
-                    <field name="selected"/>
+                    <field name="selected" string="Sincronizar"/>
                     <field name="name"/>
                     <field name="syscom_id"/>
                     <field name="title"/>
-                    <field name="active"/>
-                </list>
+                    <field name="category_count" string="Categorías"/>
+                </tree>
             </field>
         </record>
 
@@ -63,14 +63,18 @@
                         <button name="action_sync_all_models" type="object" string="Sincronizar todos los modelos" class="btn-secondary" groups="sync_syscom.group_sync_syscom_manager"/>
                     </header>
                     <sheet>
-                        <group>
+                        <group string="Identidad" colspan="2">
                             <field name="name"/>
                             <field name="syscom_id"/>
                             <field name="title"/>
-                            <field name="logo_url"/>
-                            <field name="active"/>
+                            <field name="logo_url" widget="url"/>
                         </group>
-                        <group>
+                        <group string="Sincronización" colspan="2">
+                            <field name="selected" string="Sincronizar"/>
+                            <field name="active"/>
+                            <field name="category_count" readonly="1"/>
+                        </group>
+                        <group string="Descripción" colspan="4">
                             <field name="description"/>
                         </group>
                         <notebook>
@@ -87,9 +91,60 @@
             <field name="name">Marcas SYSCOM</field>
             <field name="res_model">sync.syscom.brand</field>
             <field name="view_id" ref="view_sync_syscom_brand_tree"/>
-            <field name="view_mode">list,form</field>
+            <field name="view_mode">tree,kanban,form</field>
             <field name="help" type="html">
                 <p class="o_view_nocontent_smiling_face">Sincroniza marcas desde SYSCOM.</p>
+            </field>
+        </record>
+
+        <record id="view_sync_syscom_brand_kanban" model="ir.ui.view">
+            <field name="name">sync.syscom.brand.kanban</field>
+            <field name="model">sync.syscom.brand</field>
+            <field name="arch" type="xml">
+                <kanban create="false" class="o_kanban_small_column">
+                    <templates>
+                        <t t-name="kanban-box">
+                            <div class="oe_kanban_global_click">
+                                <div class="o_kanban_image">
+                                    <t t-if="record.logo_url.raw_value">
+                                        <img t-att-src="record.logo_url.raw_value" alt="Logo" style="max-height:60px; max-width:120px; object-fit:contain;"/>
+                                    </t>
+                                    <t t-else="">
+                                        <div class="o_placeholder o_image" style="height:60px; width:120px;">Sin logo</div>
+                                    </t>
+                                </div>
+                                <div class="o_kanban_details">
+                                    <strong><t t-esc="record.title.value or record.name.value"/></strong>
+                                    <div class="text-muted" t-esc="record.syscom_id.value"/>
+                                    <div class="mt8">
+                                        <span class="badge badge-info" t-if="record.category_count.value">
+                                            <t t-esc="record.category_count.value"/> categorías
+                                        </span>
+                                        <span class="badge badge-success" t-if="record.selected.value">Sincronizar</span>
+                                        <span class="badge badge-danger" t-if="not record.active.value">Archivada</span>
+                                    </div>
+                                    <div class="o_text_overflow" style="max-height:48px;" t-esc="record.description.value"/>
+                                </div>
+                            </div>
+                        </t>
+                    </templates>
+                </kanban>
+            </field>
+        </record>
+
+        <record id="view_sync_syscom_brand_search" model="ir.ui.view">
+            <field name="name">sync.syscom.brand.search</field>
+            <field name="model">sync.syscom.brand</field>
+            <field name="arch" type="xml">
+                <search string="Buscar marcas">
+                    <field name="name"/>
+                    <field name="title"/>
+                    <field name="syscom_id" string="ID SYSCOM"/>
+                    <filter name="selected" string="Para sincronizar" domain="[( 'selected', '=', True)]"/>
+                    <filter name="active" string="Archivadas" domain="[( 'active', '=', False)]"/>
+                    <separator/>
+                    <field name="category_ids" filter_domain="[( 'category_ids', 'in', self )]"/>
+                </search>
             </field>
         </record>
     </data>

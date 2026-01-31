@@ -19,7 +19,11 @@ class SyscomBrand(models.Model):
     description = fields.Text(string="Descripción")
     logo_url = fields.Char(string="Logo URL")
     active = fields.Boolean(string="Activo", default=True)
-    selected = fields.Boolean(string="Sel", default=False)
+    selected = fields.Boolean(
+        string="Sincronizar",
+        default=False,
+        help="Incluye esta marca en acciones de sincronización manual.",
+    )
     category_ids = fields.Many2many(
         "sync.syscom.category",
         "sync_syscom_brand_category_rel",
@@ -27,11 +31,20 @@ class SyscomBrand(models.Model):
         "category_id",
         string="Categorías",
     )
+    category_count = fields.Integer(
+        string="# Categorías",
+        compute="_compute_category_count",
+        store=False,
+    )
 
     _syscom_id_unique = models.Constraint(
         "UNIQUE(syscom_id)",
         "El ID SYSCOM debe ser único.",
     )
+
+    def _compute_category_count(self):
+        for record in self:
+            record.category_count = len(record.category_ids)
 
     def _get_selected_categories(self):
         return self.env["sync.syscom.category"].search([("selected", "=", True)])
