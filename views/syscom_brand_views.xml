@@ -104,6 +104,12 @@
                 <kanban create="false" class="o_kanban_small_column">
                     <templates>
                         <t t-name="kanban-box">
+                            <t t-call="sync_syscom.sync_syscom_brand_card"/>
+                        </t>
+                        <t t-name="card">
+                            <t t-call="sync_syscom.sync_syscom_brand_card"/>
+                        </t>
+                        <t t-name="sync_syscom.sync_syscom_brand_card">
                             <div class="oe_kanban_global_click">
                                 <div class="o_kanban_image">
                                     <t t-if="record.logo_url.raw_value">
