@@ -130,7 +130,10 @@ class SyscomCategory(models.Model):
             return syscom_id, level_val
 
         queue = []
-        for category in categories:
+        category_chunk_limit = int(params.get_param("sync_syscom.category_chunk_limit") or 5)
+        offset = int(params.get_param("sync_syscom.category_sync_offset") or 0)
+        categories_slice = categories[offset : offset + category_chunk_limit]
+        for category in categories_slice:
             item = add_category(category, level_hint=1)
             if item:
                 queue.append(item)
@@ -192,14 +195,21 @@ class SyscomCategory(models.Model):
                 child.parent_id = parent.id
 
         duration = time.monotonic() - start_time
+        offset += len(categories_slice)
+        if offset >= len(categories):
+            offset = 0
+        params.set_param("sync_syscom.category_sync_offset", offset)
+
         self.env["sync.syscom.log"].create({
             "name": _("Sincronización de categorías"),
             "kind": "info",
-            "message": _("Categorías creadas: %(created)s, actualizadas: %(updated)s. Duración: %(duration).2fs")
+            "message": _("Categorías creadas: %(created)s, actualizadas: %(updated)s. Duración: %(duration).2fs. Offset: %(offset)s/%(total)s")
             % {
                 "created": created,
                 "updated": updated,
                 "duration": duration,
+                "offset": offset,
+                "total": len(categories),
             },
         })
 
@@ -208,8 +218,8 @@ class SyscomCategory(models.Model):
             "tag": "display_notification",
             "params": {
                 "title": _("Sync SYSCOM"),
-                "message": _("Sincronización completada. Creadas: %(created)s, actualizadas: %(updated)s.")
-                % {"created": created, "updated": updated},
+                "message": _("Sincronización completada. Creadas: %(created)s, actualizadas: %(updated)s. Offset: %(offset)s/%(total)s.")
+                % {"created": created, "updated": updated, "offset": offset, "total": len(categories)},
                 "type": "success",
                 "sticky": False,
             },
@@ -336,9 +346,21 @@ class SyscomCategory(models.Model):
         }
 
     def cron_sync_categories(self):
-        """Cron: sincroniza categorías y luego lanza la cron de marcas."""
+        """Cron: sincroniza categorías en lotes; al terminar enciende cron de marcas."""
         self.action_sync_syscom()
-        cron_brand = self.env.ref("sync_syscom.cron_sync_syscom_brands_full", raise_if_not_found=False)
-        if cron_brand:
-            cron_brand.active = True
-            cron_brand.nextcall = fields.Datetime.now()
+        params = self.env["ir.config_parameter"].sudo()
+        offset = int(params.get_param("sync_syscom.category_sync_offset") or 0)
+        categories = SyscomClient(
+            base_url=params.get_param("sync_syscom.syscom_base_url") or "https://developers.syscom.mx/api/v1",
+            token=params.get_param("sync_syscom.syscom_api_token") or "",
+            timeout=int(params.get_param("sync_syscom.syscom_timeout") or 30),
+        ).get_categories() or []
+        if offset == 0 or offset >= len(categories):
+            # activar cron de marcas y desactivar este
+            cron_cat = self.env.ref("sync_syscom.cron_sync_syscom_categories", raise_if_not_found=False)
+            if cron_cat:
+                cron_cat.active = False
+            cron_brand = self.env.ref("sync_syscom.cron_sync_syscom_brands_full", raise_if_not_found=False)
+            if cron_brand:
+                cron_brand.active = True
+                cron_brand.nextcall = fields.Datetime.now()

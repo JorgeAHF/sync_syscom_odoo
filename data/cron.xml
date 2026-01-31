@@ -19,5 +19,14 @@
             <field name="interval_type">minutes</field>
             <field name="active">False</field>
         </record>
+        <record id="cron_sync_syscom_brand_products" model="ir.cron">
+            <field name="name">Sync Syscom: productos de marcas (background)</field>
+            <field name="model_id" ref="model_sync_syscom_brand"/>
+            <field name="state">code</field>
+            <field name="code">model.cron_sync_brand_products_batch()</field>
+            <field name="interval_number">1</field>
+            <field name="interval_type">minutes</field>
+            <field name="active">False</field>
+        </record>
     </data>
 </odoo>

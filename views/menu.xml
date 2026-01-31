@@ -8,8 +8,22 @@
             <field name="binding_type">action</field>
             <field name="state">code</field>
             <field name="code">
-action = env["sync.syscom.category"].action_sync_categories_and_brands()
-env["sync.syscom.brand"].search([]).action_sync_all_models()
+params = env["ir.config_parameter"].sudo()
+params.set_param("sync_syscom.category_sync_offset", 0)
+params.set_param("sync_syscom.brand_sync_offset", 0)
+params.set_param("sync_syscom.brand_products_sync_offset", 0)
+
+# Desactivar crons para reinicio limpio
+cron_cat = env.ref("sync_syscom.cron_sync_syscom_categories", raise_if_not_found=False)
+cron_brand = env.ref("sync_syscom.cron_sync_syscom_brands_full", raise_if_not_found=False)
+cron_prod = env.ref("sync_syscom.cron_sync_syscom_brand_products", raise_if_not_found=False)
+for cron in (cron_cat, cron_brand, cron_prod):
+    if cron:
+        cron.active = False
+
+# Activar pipeline: categorías -> marcas -> productos
+if cron_cat:
+    cron_cat.active = True
             </field>
         </record>
 
