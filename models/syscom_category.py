@@ -364,3 +364,21 @@ class SyscomCategory(models.Model):
             if cron_brand:
                 cron_brand.active = True
                 cron_brand.nextcall = fields.Datetime.now()
+
+    def action_start_sync_pipeline(self):
+        """Reinicia offsets y activa pipeline de crons (categorías -> marcas -> productos)."""
+        params = self.env["ir.config_parameter"].sudo()
+        params.set_param("sync_syscom.category_sync_offset", 0)
+        params.set_param("sync_syscom.brand_sync_offset", 0)
+        params.set_param("sync_syscom.brand_products_sync_offset", 0)
+
+        cron_cat = self.env.ref("sync_syscom.cron_sync_syscom_categories", raise_if_not_found=False)
+        cron_brand = self.env.ref("sync_syscom.cron_sync_syscom_brands_full", raise_if_not_found=False)
+        cron_prod = self.env.ref("sync_syscom.cron_sync_syscom_brand_products", raise_if_not_found=False)
+        for cron in (cron_cat, cron_brand, cron_prod):
+            if cron:
+                cron.active = False
+        if cron_cat:
+            cron_cat.active = True
+            cron_cat.nextcall = fields.Datetime.now()
+        return True
