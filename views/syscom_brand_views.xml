@@ -28,7 +28,7 @@
             <field name="name">sync.syscom.brand.list</field>
             <field name="model">sync.syscom.brand</field>
             <field name="arch" type="xml">
-                <tree string="Marcas SYSCOM" create="false" class="o_list_optional">
+                <list string="Marcas SYSCOM" create="false" class="o_list_optional">
                     <header>
                         <button
                             name="%(server_action_sync_syscom_models_selected)d"
@@ -50,7 +50,7 @@
                     <field name="syscom_id"/>
                     <field name="title"/>
                     <field name="category_count" string="Categorías"/>
-                </tree>
+                </list>
             </field>
         </record>
 
