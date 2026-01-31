@@ -46,6 +46,13 @@ class SyscomBrand(models.Model):
         for record in self:
             record.category_count = len(record.category_ids)
 
+    def name_get(self):
+        result = []
+        for record in self:
+            display = record.syscom_id or record.name or _("Sin ID")
+            result.append((record.id, display))
+        return result
+
     def _get_selected_categories(self):
         return self.env["sync.syscom.category"].search([("selected", "=", True)])
 
