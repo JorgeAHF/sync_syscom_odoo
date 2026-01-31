@@ -127,7 +127,7 @@
                                             <t t-esc="record.category_count.value"/> categorías
                                         </span>
                                         <span class="badge badge-success" t-if="record.selected.value">Sincronizar</span>
-                                        <span class="badge badge-danger" t-if="not record.active.value">Archivada</span>
+                                        <span class="badge badge-danger" t-if="!record.active.value">Archivada</span>
                                     </div>
                                     <div class="o_text_overflow" style="max-height:48px;" t-esc="record.description.value"/>
                                 </div>
