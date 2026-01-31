@@ -40,6 +40,12 @@ class SyscomCategory(models.Model):
         "product_id",
         string="Modelos vinculados",
     )
+    brand_ids_tree = fields.Many2many(
+        "sync.syscom.brand",
+        compute="_compute_brand_ids_tree",
+        string="Marcas (árbol)",
+        store=False,
+    )
     model_names = fields.Char(string="Modelos", compute="_compute_model_names", store=False)
     level1_name = fields.Char(string="Nivel 1", compute="_compute_level_names", store=True)
     level2_name = fields.Char(string="Nivel 2", compute="_compute_level_names", store=True)
@@ -70,6 +76,17 @@ class SyscomCategory(models.Model):
         for record in self:
             models = [m for m in record.product_ids.mapped("model") if m]
             record.model_names = ", ".join(sorted(set(models))) if models else False
+
+    def _compute_brand_ids_tree(self):
+        Brand = self.env["sync.syscom.brand"]
+        Category = self.env["sync.syscom.category"]
+        for record in self:
+            # Obtener la categoría y todas sus descendientes
+            cat_ids = Category.search([("id", "child_of", record.id)]).ids
+            brands = Brand.browse([])
+            if cat_ids:
+                brands = Brand.search([("category_ids.id", "in", cat_ids)])
+            record.brand_ids_tree = brands
 
     def action_sync_syscom(self):
         params = self.env["ir.config_parameter"].sudo()
