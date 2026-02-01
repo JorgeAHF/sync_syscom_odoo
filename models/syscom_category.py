@@ -330,6 +330,13 @@ class SyscomCategory(models.Model):
         params.set_param("sync_syscom.brand_sync_offset", 0)
         # Activar cron de categorías (que al terminar activará la de marcas)
         cron_cat = self.env.ref("sync_syscom.cron_sync_syscom_categories", raise_if_not_found=False).sudo()
+
+        # Registrar en log que la sincronización fue programada
+        self.env["sync.syscom.log"].sudo().create({
+            "name": _("Inicio sincronización categorías → marcas"),
+            "kind": "info",
+            "message": _("Se programó la sincronización en segundo plano de categorías y luego marcas."),
+        })
         if cron_cat:
             cron_cat.active = True
             cron_cat.nextcall = fields.Datetime.now()
@@ -370,6 +377,13 @@ class SyscomCategory(models.Model):
         params.set_param("sync_syscom.category_sync_offset", 0)
         params.set_param("sync_syscom.brand_sync_offset", 0)
         params.set_param("sync_syscom.brand_products_sync_offset", 0)
+
+        # Registrar en log el inicio del pipeline completo
+        self.env["sync.syscom.log"].sudo().create({
+            "name": _("Inicio pipeline de sincronización"),
+            "kind": "info",
+            "message": _("Se programó la sincronización de categorías, marcas y productos."),
+        })
 
         cron_cat = self.env.ref("sync_syscom.cron_sync_syscom_categories", raise_if_not_found=False).sudo()
         cron_brand = self.env.ref("sync_syscom.cron_sync_syscom_brands_full", raise_if_not_found=False).sudo()

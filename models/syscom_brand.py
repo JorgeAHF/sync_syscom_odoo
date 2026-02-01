@@ -63,6 +63,13 @@ class SyscomBrand(models.Model):
         params.set_param("sync_syscom.brand_sync_offset", 0)
         params.set_param("sync_syscom.brand_products_sync_offset", 0)
 
+        # Registrar en log el inicio de la sincronización
+        self.env["sync.syscom.log"].sudo().create({
+            "name": _("Inicio sincronización de marcas/modelos (cron)"),
+            "kind": "info",
+            "message": _("Se programó la sincronización completa de marcas y productos."),
+        })
+
         cron_brand = self.env.ref("sync_syscom.cron_sync_syscom_brands_full", raise_if_not_found=False).sudo()
         cron_prod = self.env.ref("sync_syscom.cron_sync_syscom_brand_products", raise_if_not_found=False).sudo()
         for cron in (cron_brand, cron_prod):
