@@ -53,10 +53,9 @@ class SyscomCategory(models.Model):
     level2_name = fields.Char(string="Nivel 2", compute="_compute_level_names", store=True)
     level3_name = fields.Char(string="Nivel 3", compute="_compute_level_names", store=True)
 
-    _syscom_id_unique = models.Constraint(
-        "UNIQUE(syscom_id)",
-        "El ID SYSCOM debe ser único.",
-    )
+    _sql_constraints = [
+        ("syscom_id_unique", "unique(syscom_id)", "El ID SYSCOM debe ser único."),
+    ]
 
     @api.depends("name", "level", "parent_id")
     def _compute_level_names(self):
@@ -330,7 +329,7 @@ class SyscomCategory(models.Model):
         # Resetear offset de marcas
         params.set_param("sync_syscom.brand_sync_offset", 0)
         # Activar cron de categorías (que al terminar activará la de marcas)
-        cron_cat = self.env.ref("sync_syscom.cron_sync_syscom_categories", raise_if_not_found=False)
+        cron_cat = self.env.ref("sync_syscom.cron_sync_syscom_categories", raise_if_not_found=False).sudo()
         if cron_cat:
             cron_cat.active = True
             cron_cat.nextcall = fields.Datetime.now()
@@ -357,10 +356,10 @@ class SyscomCategory(models.Model):
         ).get_categories() or []
         if offset == 0 or offset >= len(categories):
             # activar cron de marcas y desactivar este
-            cron_cat = self.env.ref("sync_syscom.cron_sync_syscom_categories", raise_if_not_found=False)
+            cron_cat = self.env.ref("sync_syscom.cron_sync_syscom_categories", raise_if_not_found=False).sudo()
             if cron_cat:
                 cron_cat.active = False
-            cron_brand = self.env.ref("sync_syscom.cron_sync_syscom_brands_full", raise_if_not_found=False)
+            cron_brand = self.env.ref("sync_syscom.cron_sync_syscom_brands_full", raise_if_not_found=False).sudo()
             if cron_brand:
                 cron_brand.active = True
                 cron_brand.nextcall = fields.Datetime.now()
@@ -372,9 +371,9 @@ class SyscomCategory(models.Model):
         params.set_param("sync_syscom.brand_sync_offset", 0)
         params.set_param("sync_syscom.brand_products_sync_offset", 0)
 
-        cron_cat = self.env.ref("sync_syscom.cron_sync_syscom_categories", raise_if_not_found=False)
-        cron_brand = self.env.ref("sync_syscom.cron_sync_syscom_brands_full", raise_if_not_found=False)
-        cron_prod = self.env.ref("sync_syscom.cron_sync_syscom_brand_products", raise_if_not_found=False)
+        cron_cat = self.env.ref("sync_syscom.cron_sync_syscom_categories", raise_if_not_found=False).sudo()
+        cron_brand = self.env.ref("sync_syscom.cron_sync_syscom_brands_full", raise_if_not_found=False).sudo()
+        cron_prod = self.env.ref("sync_syscom.cron_sync_syscom_brand_products", raise_if_not_found=False).sudo()
         for cron in (cron_cat, cron_brand, cron_prod):
             if cron:
                 cron.active = False

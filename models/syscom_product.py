@@ -15,7 +15,7 @@ class SyscomProduct(models.Model):
     brand_id = fields.Many2one("sync.syscom.brand", string="Marca")
     category_ids = fields.Many2many(
         "sync.syscom.category",
-        "sync_syscom_product_category_rel",
+        "sync_syscom_category_product_rel",
         "product_id",
         "category_id",
         string="Categorías",
@@ -29,10 +29,9 @@ class SyscomProduct(models.Model):
     description = fields.Text(string="Descripción")
     payload = fields.Json(string="Payload SYSCOM")
 
-    _syscom_id_unique = models.Constraint(
-        "UNIQUE(syscom_id)",
-        "El ID SYSCOM debe ser único.",
-    )
+    _sql_constraints = [
+        ("syscom_id_unique", "unique(syscom_id)", "El ID SYSCOM debe ser único."),
+    ]
 
     def action_publish_selected(self):
         params = self.env["ir.config_parameter"].sudo()

@@ -38,10 +38,9 @@ class SyscomBrand(models.Model):
         store=False,
     )
 
-    _syscom_id_unique = models.Constraint(
-        "UNIQUE(syscom_id)",
-        "El ID SYSCOM debe ser único.",
-    )
+    _sql_constraints = [
+        ("syscom_id_unique", "unique(syscom_id)", "El ID SYSCOM debe ser único."),
+    ]
 
     def _compute_category_count(self):
         for record in self:
@@ -64,8 +63,8 @@ class SyscomBrand(models.Model):
         params.set_param("sync_syscom.brand_sync_offset", 0)
         params.set_param("sync_syscom.brand_products_sync_offset", 0)
 
-        cron_brand = self.env.ref("sync_syscom.cron_sync_syscom_brands_full", raise_if_not_found=False)
-        cron_prod = self.env.ref("sync_syscom.cron_sync_syscom_brand_products", raise_if_not_found=False)
+        cron_brand = self.env.ref("sync_syscom.cron_sync_syscom_brands_full", raise_if_not_found=False).sudo()
+        cron_prod = self.env.ref("sync_syscom.cron_sync_syscom_brand_products", raise_if_not_found=False).sudo()
         for cron in (cron_brand, cron_prod):
             if cron:
                 cron.active = False
@@ -166,11 +165,11 @@ class SyscomBrand(models.Model):
         params = self.env["ir.config_parameter"].sudo()
         offset = int(params.get_param("sync_syscom.brand_sync_offset") or 0)
         if offset == 0:
-            cron = self.env.ref("sync_syscom.cron_sync_syscom_brands_full", raise_if_not_found=False)
+            cron = self.env.ref("sync_syscom.cron_sync_syscom_brands_full", raise_if_not_found=False).sudo()
             if cron:
                 cron.active = False
             # Activar cron de productos de marcas
-            cron_prod = self.env.ref("sync_syscom.cron_sync_syscom_brand_products", raise_if_not_found=False)
+            cron_prod = self.env.ref("sync_syscom.cron_sync_syscom_brand_products", raise_if_not_found=False).sudo()
             if cron_prod:
                 cron_prod.active = True
                 cron_prod.nextcall = fields.Datetime.now()
@@ -204,7 +203,7 @@ class SyscomBrand(models.Model):
         params.set_param("sync_syscom.brand_products_sync_offset", offset)
 
         if offset == 0:
-            cron = self.env.ref("sync_syscom.cron_sync_syscom_brand_products", raise_if_not_found=False)
+            cron = self.env.ref("sync_syscom.cron_sync_syscom_brand_products", raise_if_not_found=False).sudo()
             if cron:
                 cron.active = False
 
@@ -686,7 +685,11 @@ class SyscomBrand(models.Model):
                     record.category_ids = [(6, 0, category_ids)]
 
             # Productos por marca (con categorías)
-            products = client.get_brand_products(syscom_id) or []
+            products = self._fetch_all_brand_products(
+                client,
+                syscom_id,
+                stock=params.get_param("sync_syscom.brand_products_stock"),
+            ) or []
             for product in products:
                 prod_syscom_id = str(product.get("producto_id") or product.get("id") or "").strip()
                 if not prod_syscom_id:
