@@ -9,7 +9,7 @@
             <field name="binding_type">action</field>
             <field name="state">code</field>
             <field name="code">
-env["sync.syscom.brand"].action_start_brand_sync()
+action = env["sync.syscom.brand"].action_start_brand_sync()
             </field>
         </record>
 

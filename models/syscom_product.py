@@ -29,9 +29,10 @@ class SyscomProduct(models.Model):
     description = fields.Text(string="Descripción")
     payload = fields.Json(string="Payload SYSCOM")
 
-    _sql_constraints = [
-        ("syscom_id_unique", "unique(syscom_id)", "El ID SYSCOM debe ser único."),
-    ]
+    _syscom_id_unique = models.Constraint(
+        "unique(syscom_id)",
+        "El ID SYSCOM debe ser único.",
+    )
 
     def action_publish_selected(self):
         params = self.env["ir.config_parameter"].sudo()

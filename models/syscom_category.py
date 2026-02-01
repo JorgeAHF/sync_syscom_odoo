@@ -53,9 +53,10 @@ class SyscomCategory(models.Model):
     level2_name = fields.Char(string="Nivel 2", compute="_compute_level_names", store=True)
     level3_name = fields.Char(string="Nivel 3", compute="_compute_level_names", store=True)
 
-    _sql_constraints = [
-        ("syscom_id_unique", "unique(syscom_id)", "El ID SYSCOM debe ser único."),
-    ]
+    _syscom_id_unique = models.Constraint(
+        "unique(syscom_id)",
+        "El ID SYSCOM debe ser único.",
+    )
 
     @api.depends("name", "level", "parent_id")
     def _compute_level_names(self):
@@ -353,8 +354,13 @@ class SyscomCategory(models.Model):
 
     def cron_sync_categories(self):
         """Cron: sincroniza categorías en lotes; al terminar enciende cron de marcas."""
-        self.action_sync_syscom()
         params = self.env["ir.config_parameter"].sudo()
+        offset = int(params.get_param("sync_syscom.category_sync_offset") or 0)
+        # Si ya se marcó como finalizado (-1), salir rápido
+        if offset == -1:
+            return
+
+        self.action_sync_syscom()
         offset = int(params.get_param("sync_syscom.category_sync_offset") or 0)
         categories = SyscomClient(
             base_url=params.get_param("sync_syscom.syscom_base_url") or "https://developers.syscom.mx/api/v1",
@@ -362,10 +368,15 @@ class SyscomCategory(models.Model):
             timeout=int(params.get_param("sync_syscom.syscom_timeout") or 30),
         ).get_categories() or []
         if offset == 0 or offset >= len(categories):
-            # activar cron de marcas y desactivar este
+            # marcar como finalizado para evitar loops y activar cron de marcas
+            params.set_param("sync_syscom.category_sync_offset", -1)
             cron_cat = self.env.ref("sync_syscom.cron_sync_syscom_categories", raise_if_not_found=False).sudo()
             if cron_cat:
-                cron_cat.active = False
+                try:
+                    cron_cat.write({"active": False})
+                except UserError:
+                    # si está bloqueado por ejecución, se reintentará en el siguiente tick
+                    pass
             cron_brand = self.env.ref("sync_syscom.cron_sync_syscom_brands_full", raise_if_not_found=False).sudo()
             if cron_brand:
                 cron_brand.active = True

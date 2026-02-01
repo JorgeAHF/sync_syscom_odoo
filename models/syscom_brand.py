@@ -38,9 +38,10 @@ class SyscomBrand(models.Model):
         store=False,
     )
 
-    _sql_constraints = [
-        ("syscom_id_unique", "unique(syscom_id)", "El ID SYSCOM debe ser único."),
-    ]
+    _syscom_id_unique = models.Constraint(
+        "unique(syscom_id)",
+        "El ID SYSCOM debe ser único.",
+    )
 
     def _compute_category_count(self):
         for record in self:

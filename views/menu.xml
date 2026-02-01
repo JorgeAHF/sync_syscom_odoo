@@ -8,7 +8,7 @@
             <field name="binding_type">action</field>
             <field name="state">code</field>
             <field name="code">
-env["sync.syscom.category"].action_start_sync_pipeline()
+action = env["sync.syscom.category"].action_start_sync_pipeline()
             </field>
         </record>
 
