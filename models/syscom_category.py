@@ -370,13 +370,6 @@ class SyscomCategory(models.Model):
         if offset == 0 or offset >= len(categories):
             # marcar como finalizado para evitar loops y activar cron de marcas
             params.set_param("sync_syscom.category_sync_offset", -1)
-            cron_cat = self.env.ref("sync_syscom.cron_sync_syscom_categories", raise_if_not_found=False).sudo()
-            if cron_cat:
-                try:
-                    cron_cat.write({"active": False})
-                except UserError:
-                    # si está bloqueado por ejecución, se reintentará en el siguiente tick
-                    pass
             cron_brand = self.env.ref("sync_syscom.cron_sync_syscom_brands_full", raise_if_not_found=False).sudo()
             if cron_brand:
                 cron_brand.active = True
