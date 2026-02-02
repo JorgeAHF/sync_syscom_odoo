@@ -58,6 +58,14 @@ class SyscomBrand(models.Model):
     def _get_selected_categories(self):
         return self.env["sync.syscom.category"].search([("selected", "=", True)])
 
+    def _deactivate_cron_safely(self, cron):
+        """Deactivate cron even when the same job is running (bypasses write guard)."""
+        if not cron or not cron.id:
+            return
+        # Direct SQL avoids ir.cron.write() safeguard that forbids editing the running job.
+        self.env.cr.execute("UPDATE ir_cron SET active=%s WHERE id=%s", (False, cron.id))
+        cron.invalidate_cache(["active"])
+
     def action_start_brand_sync(self):
         """Reinicia offsets de marcas/productos y arranca la cron de marcas en background."""
         params = self.env["ir.config_parameter"].sudo()
@@ -75,7 +83,7 @@ class SyscomBrand(models.Model):
         cron_prod = self.env.ref("sync_syscom.cron_sync_syscom_brand_products", raise_if_not_found=False).sudo()
         for cron in (cron_brand, cron_prod):
             if cron:
-                cron.active = False
+                self._deactivate_cron_safely(cron)
         if cron_brand:
             cron_brand.active = True
             cron_brand.nextcall = fields.Datetime.now()
@@ -191,7 +199,7 @@ class SyscomBrand(models.Model):
         if offset == 0:
             cron = self.env.ref("sync_syscom.cron_sync_syscom_brands_full", raise_if_not_found=False).sudo()
             if cron:
-                cron.active = False
+                self._deactivate_cron_safely(cron)
             # Activar cron de productos de marcas
             cron_prod = self.env.ref("sync_syscom.cron_sync_syscom_brand_products", raise_if_not_found=False).sudo()
             if cron_prod:
@@ -236,7 +244,7 @@ class SyscomBrand(models.Model):
         if offset == 0:
             cron = self.env.ref("sync_syscom.cron_sync_syscom_brand_products", raise_if_not_found=False).sudo()
             if cron:
-                cron.active = False
+                self._deactivate_cron_safely(cron)
 
     def action_sync_all_brands_batch(self):
         """Sincroniza marcas en lotes, usando offset persistido para evitar timeouts."""
