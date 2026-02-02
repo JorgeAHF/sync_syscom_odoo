@@ -62,8 +62,13 @@ class SyscomBrand(models.Model):
         """Deactivate cron even when the same job is running (bypasses write guard)."""
         if not cron or not cron.id:
             return
-        # Direct SQL avoids ir.cron.write() safeguard that forbids editing the running job.
-        self.env.cr.execute("UPDATE ir_cron SET active=%s WHERE id=%s", (False, cron.id))
+        # Use a fresh cursor to avoid locks/guards on the running transaction.
+        with self.pool.cursor() as cr:
+            try:
+                cr.execute("UPDATE ir_cron SET active=%s WHERE id=%s", (False, cron.id))
+            except Exception:
+                # If we cannot flip it (e.g., lock), just return; next loop will retry.
+                return
         cron.invalidate_cache(["active"])
 
     def action_start_brand_sync(self):
