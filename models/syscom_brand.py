@@ -93,10 +93,12 @@ class SyscomBrand(models.Model):
     def _fetch_all_brand_products(self, client, brand_syscom_id, stock=None, timeout=None, page_limit=200):
         """
         Itera paginando /marcas/{id}/productos hasta que no haya resultados o se alcance page_limit.
-        Devuelve lista acumulada.
+        Devuelve lista acumulada y metadatos (paginas, procesadas).
         """
         all_products = []
         page = 1
+        total_pages = None
+        total_count = 0
         while page <= page_limit:
             products = client.get_brand_products(brand_syscom_id, page=page, stock=stock)
             if not products:
@@ -104,6 +106,8 @@ class SyscomBrand(models.Model):
             # Algunas respuestas vienen con dict {productos: [...]} si agrupar; contemplamos lista directa.
             if isinstance(products, dict) and "productos" in products:
                 batch = products.get("productos") or []
+                total_pages = products.get("paginas") or total_pages
+                total_count = products.get("cantidad") or total_count
             else:
                 batch = products or []
             if not batch:
@@ -112,11 +116,11 @@ class SyscomBrand(models.Model):
             if len(batch) < 60:  # heurística: SYSCOM suele paginar a 60
                 break
             page += 1
-        return all_products
+        return all_products, page - 1, total_pages, total_count
 
     def _sync_brand_products_for_brand(self, client, brand_record, params):
         """Crea/actualiza stubs de productos y vincula categorías para una marca."""
-        products = self._fetch_all_brand_products(
+        products, pages_done, pages_total, total_count = self._fetch_all_brand_products(
             client,
             brand_record.syscom_id,
             stock=params.get_param("sync_syscom.brand_products_stock"),
@@ -164,6 +168,18 @@ class SyscomBrand(models.Model):
             category = self.env["sync.syscom.category"].browse(cat_id)
             category.product_ids = [(6, 0, list(set(prod_ids)))]
 
+        # Registrar metadatos de lote
+        self.env["sync.syscom.log"].sudo().create({
+            "name": _("Sync productos marca %(b)s") % {"b": brand_record.syscom_id},
+            "kind": "info",
+            "message": _("Productos obtenidos: %(n)s, páginas: %(d)s/%(t)s, total reportado: %(c)s") % {
+                "n": len(products),
+                "d": pages_done,
+                "t": pages_total or "¿?",
+                "c": total_count or "¿?",
+            },
+        })
+
         return len(products)
 
     def cron_sync_all_brands_batch(self):
@@ -202,8 +218,15 @@ class SyscomBrand(models.Model):
         slice_brands = brands[offset : offset + chunk_limit]
         processed = 0
         for brand in slice_brands:
-            self._sync_brand_products_for_brand(client, brand, params)
-            processed += 1
+            try:
+                self._sync_brand_products_for_brand(client, brand, params)
+                processed += 1
+            except Exception as exc:
+                self.env["sync.syscom.log"].sudo().create({
+                    "name": _("Sync productos marca %(b)s") % {"b": brand.syscom_id},
+                    "kind": "error",
+                    "message": _("Error sincronizando marca: %s") % exc,
+                })
             offset += 1
 
         if offset >= total:

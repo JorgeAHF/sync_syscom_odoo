@@ -250,6 +250,11 @@ class SyscomProduct(models.Model):
                     "sync_error": str(exc),
                     "synced_at": fields.Datetime.now(),
                 })
+                self.env["sync.syscom.log"].sudo().create({
+                    "name": "Error publicación producto",
+                    "kind": "error",
+                    "message": "%s (%s)" % (product.name or product.syscom_id, exc),
+                })
                 continue
 
         self.env["sync.syscom.log"].create({
