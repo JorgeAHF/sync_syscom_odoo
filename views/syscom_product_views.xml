@@ -87,11 +87,6 @@
                             <field name="synced_at"/>
                             <field name="sync_error"/>
                         </group>
-                        <div class="oe_button_box" name="button_box">
-                            <button type="action" name="%(action_sync_syscom_log)d" class="oe_stat_button" icon="fa-list" context="{'search_default_product': active_id}">
-                                <span>Logs</span>
-                            </button>
-                        </div>
                         <notebook>
                             <page string="Existencias">
                                 <field name="existence_json"/>
