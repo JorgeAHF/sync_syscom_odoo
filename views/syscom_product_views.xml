@@ -33,8 +33,9 @@
                     <field name="brand_id"/>
                     <field name="category_ids" widget="many2many_tags"/>
                     <field name="price_list"/>
+                    <field name="price_list_mxn"/>
                     <field name="price_special"/>
-                    <field name="price_discounts"/>
+                    <field name="price_special_mxn"/>
                     <field name="active"/>
                 </list>
             </field>
@@ -55,20 +56,51 @@
                             <field name="category_ids" widget="many2many_tags"/>
                             <field name="active"/>
                         </group>
-                        <group>
+                        <group string="Precios USD">
                             <field name="price_list"/>
                             <field name="price_special"/>
                             <field name="price_discounts"/>
                             <field name="currency"/>
+                        </group>
+                        <group string="Precios MXN">
+                            <field name="price_list_mxn"/>
+                            <field name="price_special_mxn"/>
+                            <field name="price_discounts_mxn"/>
+                            <field name="exchange_rate"/>
+                            <field name="exchange_rate_date"/>
+                        </group>
+                        <group string="Inventario y SAT">
+                            <field name="total_existencia"/>
+                            <field name="sat_key"/>
                             <field name="link"/>
                         </group>
-                        <group>
-                            <field name="description"/>
+                        <group string="Medios">
                             <field name="image_url"/>
+                            <field name="brand_logo_url"/>
                         </group>
-                        <group>
-                            <field name="payload"/>
+                        <group string="Descripción">
+                            <field name="description"/>
                         </group>
+                        <group string="Metadatos">
+                            <field name="synced_at"/>
+                            <field name="sync_error"/>
+                        </group>
+                        <notebook>
+                            <page string="Existencias">
+                                <field name="existence_json"/>
+                            </page>
+                            <page string="Iconos/Features">
+                                <field name="icons_json"/>
+                                <field name="features_json"/>
+                            </page>
+                            <page string="Imágenes/Recursos">
+                                <field name="images_json"/>
+                                <field name="resources_json"/>
+                            </page>
+                            <page string="Payload">
+                                <field name="payload"/>
+                            </page>
+                        </notebook>
                     </sheet>
                 </form>
             </field>

@@ -20,14 +20,29 @@ class SyscomProduct(models.Model):
         "category_id",
         string="Categorías",
     )
-    price_list = fields.Float(string="Precio lista")
-    price_special = fields.Float(string="Precio especial")
-    price_discounts = fields.Float(string="Precio con descuentos")
-    currency = fields.Char(string="Moneda", default="MXN")
+    price_list = fields.Float(string="Precio lista (USD)")
+    price_special = fields.Float(string="Precio especial (USD)")
+    price_discounts = fields.Float(string="Precio con descuentos (USD)")
+    price_list_mxn = fields.Float(string="Precio lista (MXN)")
+    price_special_mxn = fields.Float(string="Precio especial (MXN)")
+    price_discounts_mxn = fields.Float(string="Precio con descuentos (MXN)")
+    exchange_rate = fields.Float(string="Tipo de cambio aplicado")
+    exchange_rate_date = fields.Date(string="Fecha tipo de cambio")
+    currency = fields.Char(string="Moneda origen", default="USD")
+    total_existencia = fields.Integer(string="Existencia total")
+    sat_key = fields.Char(string="Clave SAT")
     image_url = fields.Char(string="Imagen portada")
+    brand_logo_url = fields.Char(string="Logo de marca")
     link = fields.Char(string="Link")
+    existence_json = fields.Json(string="Existencias (JSON)")
+    icons_json = fields.Json(string="Iconos (JSON)")
+    features_json = fields.Json(string="Características (JSON)")
+    images_json = fields.Json(string="Imágenes (JSON)")
+    resources_json = fields.Json(string="Recursos (JSON)")
     description = fields.Text(string="Descripción")
     payload = fields.Json(string="Payload SYSCOM")
+    synced_at = fields.Datetime(string="Sincronizado en")
+    sync_error = fields.Text(string="Último error de sync")
 
     _syscom_id_unique = models.Constraint(
         "unique(syscom_id)",
