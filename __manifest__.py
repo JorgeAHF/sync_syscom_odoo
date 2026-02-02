@@ -10,6 +10,8 @@
         "security/security.xml",
         "security/ir.model.access.csv",
         "views/res_config_settings_view.xml",
+        "data/pricelist.xml",
+        "data/stock_syscom.xml",
         "views/syscom_category_views.xml",
         "views/syscom_brand_views.xml",
         "views/syscom_product_views.xml",

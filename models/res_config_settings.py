@@ -21,6 +21,34 @@ class ResConfigSettings(models.TransientModel):
         default=30,
         config_parameter="sync_syscom.syscom_timeout",
     )
+    syscom_min_stock = fields.Integer(
+        string="Stock mínimo de SYSCOM",
+        default=1,
+        required=True,
+        config_parameter="sync_syscom.min_stock",
+        help="Cantidad mínima de existencia en SYSCOM para permitir dar de alta/publicar un producto.",
+    )
+    syscom_pricelist_list = fields.Many2one(
+        "product.pricelist",
+        string="Pricelist lista SYSCOM",
+        config_parameter="sync_syscom.pricelist_list_id",
+        default=lambda self: self.env.ref("sync_syscom.pricelist_syscom_list", raise_if_not_found=False),
+        help="Lista de precios donde se guardará el precio lista de SYSCOM (MXN).",
+    )
+    syscom_pricelist_special = fields.Many2one(
+        "product.pricelist",
+        string="Pricelist especial SYSCOM",
+        config_parameter="sync_syscom.pricelist_special_id",
+        default=lambda self: self.env.ref("sync_syscom.pricelist_syscom_special", raise_if_not_found=False),
+        help="Lista de precios donde se guardará el precio especial de SYSCOM (MXN).",
+    )
+    syscom_price_currency = fields.Selection(
+        [("usd", "USD (convertir a MXN)"), ("mxn", "MXN (no convertir)")],
+        string="Moneda origen de precios SYSCOM",
+        default="usd",
+        config_parameter="sync_syscom.price_currency",
+        help="Controla si los precios traídos se convierten con el tipo de cambio o ya vienen en MXN.",
+    )
 
     def action_syscom_test_connection(self):
         self.ensure_one()

@@ -122,6 +122,9 @@ class SyscomProduct(models.Model):
         client = self._get_client()
         selected = self.search([("selected", "=", True)])
         updated = failed = 0
+        params = self.env["ir.config_parameter"].sudo()
+        location = self.env.ref("sync_syscom.stock_location_syscom", raise_if_not_found=False)
+        quant_model = self.env["stock.quant"]
         for prod in selected:
             try:
                 detail = client.get_product_detail(prod.syscom_id) or {}
@@ -133,6 +136,25 @@ class SyscomProduct(models.Model):
                     "synced_at": fields.Datetime.now(),
                     "sync_error": False,
                 })
+                # Actualizar stock virtual SYSCOM si la ubicación existe
+                if location:
+                    product_template = self.env["product.template"].search(
+                        [("default_code", "=", prod.model or prod.syscom_id)],
+                        limit=1,
+                    )
+                    if product_template:
+                        quant = quant_model.sudo().search([
+                            ("product_tmpl_id", "=", product_template.id),
+                            ("location_id", "=", location.id),
+                        ], limit=1)
+                        if quant:
+                            quant.sudo().write({"quantity": total_existencia})
+                        else:
+                            quant_model.sudo().create({
+                                "product_tmpl_id": product_template.id,
+                                "location_id": location.id,
+                                "quantity": total_existencia,
+                            })
                 updated += 1
             except Exception as exc:
                 prod.write({
@@ -168,6 +190,12 @@ class SyscomProduct(models.Model):
         except Exception:
             exchange_rate = 1.0
         exchange_rate_date = fields.Date.context_today(self)
+        min_stock = int(params.get_param("sync_syscom.min_stock") or 1)
+        if min_stock < 1:
+            min_stock = 1
+        price_currency = params.get_param("sync_syscom.price_currency") or "usd"
+        pricelist_list_id = int(params.get_param("sync_syscom.pricelist_list_id") or 0)
+        pricelist_special_id = int(params.get_param("sync_syscom.pricelist_special_id") or 0)
 
         for product in selected_products:
             try:
@@ -178,9 +206,14 @@ class SyscomProduct(models.Model):
                 price_special = self._to_float(precios.get("precio_especial"))
                 price_discounts = self._to_float(precios.get("precio_descuentos"))
 
-                price_list_mxn = price_list * exchange_rate
-                price_special_mxn = price_special * exchange_rate
-                price_discounts_mxn = price_discounts * exchange_rate
+                if price_currency == "usd":
+                    price_list_mxn = price_list * exchange_rate
+                    price_special_mxn = price_special * exchange_rate
+                    price_discounts_mxn = price_discounts * exchange_rate
+                else:
+                    price_list_mxn = price_list
+                    price_special_mxn = price_special
+                    price_discounts_mxn = price_discounts
 
                 name = detail.get("titulo") or product.name
                 default_code = detail.get("modelo") or product.model
@@ -195,6 +228,12 @@ class SyscomProduct(models.Model):
                 features_json = detail.get("características") or detail.get("caracteristicas") or []
                 images_json = detail.get("imágenes") or detail.get("imagenes") or []
                 resources_json = detail.get("recursos") or []
+
+                # Validación de stock mínimo antes de dar de alta/publicar
+                if total_existencia < min_stock:
+                    raise UserError(
+                        "Stock insuficiente en SYSCOM (%s). Mínimo requerido: %s." % (total_existencia, min_stock)
+                    )
 
                 product_vals = {
                     "name": name,
@@ -254,6 +293,32 @@ class SyscomProduct(models.Model):
                 else:
                     template = self.env["product.template"].create(template_vals)
                     created += 1
+
+                # Actualizar listas de precios SYSCOM si están configuradas
+                pricelist_items = []
+                if pricelist_list_id:
+                    pricelist_items.append((pricelist_list_id, price_list_mxn))
+                if pricelist_special_id:
+                    pricelist_items.append((pricelist_special_id, price_special_mxn))
+
+                for plist_id, price in pricelist_items:
+                    # Update or create per product tmpl
+                    existing_item = self.env["product.pricelist.item"].sudo().search([
+                        ("pricelist_id", "=", plist_id),
+                        ("product_tmpl_id", "=", template.id),
+                        ("applied_on", "=", "1_product"),
+                    ], limit=1)
+                    vals_item = {
+                        "pricelist_id": plist_id,
+                        "applied_on": "1_product",
+                        "product_tmpl_id": template.id,
+                        "compute_price": "fixed",
+                        "fixed_price": price,
+                    }
+                    if existing_item:
+                        existing_item.write({"fixed_price": price})
+                    else:
+                        self.env["product.pricelist.item"].sudo().create(vals_item)
 
             except Exception as exc:
                 failed += 1

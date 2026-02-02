@@ -36,6 +36,31 @@
                                                 <field name="syscom_timeout"/>
                                             </div>
                                         </div>
+                                        <div class="row mt8">
+                                            <label class="col-lg-4 o_light_label" for="syscom_price_currency"/>
+                                            <div class="col-lg-8">
+                                                <field name="syscom_price_currency" class="oe_inline"/>
+                                            </div>
+                                        </div>
+                                        <div class="row mt8">
+                                            <label class="col-lg-4 o_light_label" for="syscom_pricelist_list"/>
+                                            <div class="col-lg-8">
+                                                <field name="syscom_pricelist_list" options=\"{'no_create': True}\"/>
+                                            </div>
+                                        </div>
+                                        <div class="row mt8">
+                                            <label class="col-lg-4 o_light_label" for="syscom_pricelist_special"/>
+                                            <div class="col-lg-8">
+                                                <field name="syscom_pricelist_special" options=\"{'no_create': True}\"/>
+                                            </div>
+                                        </div>
+                                        <div class="row mt8">
+                                            <label class="col-lg-4 o_light_label" for="syscom_min_stock"/>
+                                            <div class="col-lg-8">
+                                                <field name="syscom_min_stock" class="oe_inline"/>
+                                                <span class="text-muted ms-2">Cantidad mínima en SYSCOM para publicar productos (>=1).</span>
+                                            </div>
+                                        </div>
                                         <div class="row mt16">
                                             <div class="col-lg-8 offset-lg-4">
                                                 <button type="object" name="action_syscom_test_connection" string="Probar conexión" class="btn btn-primary"/>
