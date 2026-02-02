@@ -7,6 +7,14 @@ class SyscomProduct(models.Model):
     _description = "Producto SYSCOM (staging)"
     _order = "model"
 
+    @staticmethod
+    def _to_float(value):
+        """Coerce API values to float; fallback to 0.0 on any error."""
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return 0.0
+
     name = fields.Char(string="Nombre", required=True)
     syscom_id = fields.Char(string="ID SYSCOM", required=True, index=True)
     model = fields.Char(string="Modelo", index=True)
@@ -75,10 +83,13 @@ class SyscomProduct(models.Model):
         for prod in products:
             if prod.price_list is None:
                 continue
+            price_list = self._to_float(prod.price_list)
+            price_special = self._to_float(prod.price_special)
+            price_discounts = self._to_float(prod.price_discounts)
             prod.write({
-                "price_list_mxn": (prod.price_list or 0.0) * exchange_rate,
-                "price_special_mxn": (prod.price_special or 0.0) * exchange_rate,
-                "price_discounts_mxn": (prod.price_discounts or 0.0) * exchange_rate,
+                "price_list_mxn": price_list * exchange_rate,
+                "price_special_mxn": price_special * exchange_rate,
+                "price_discounts_mxn": price_discounts * exchange_rate,
                 "exchange_rate": exchange_rate,
                 "exchange_rate_date": exchange_rate_date,
             })
@@ -92,7 +103,7 @@ class SyscomProduct(models.Model):
             prod = products.filtered(lambda p: p.model == tmpl.default_code or p.syscom_id == tmpl.default_code)
             if not prod:
                 continue
-            price_mxn = (prod.price_list or 0.0) * exchange_rate
+            price_mxn = self._to_float(prod[0].price_list) * exchange_rate
             tmpl.write({"list_price": price_mxn})
             updated_templates += 1
 
@@ -163,9 +174,9 @@ class SyscomProduct(models.Model):
                 detail = client.get_product_detail(product.syscom_id) or {}
 
                 precios = detail.get("precios") or {}
-                price_list = precios.get("precio_lista") or 0.0
-                price_special = precios.get("precio_especial") or 0.0
-                price_discounts = precios.get("precio_descuentos") or 0.0
+                price_list = self._to_float(precios.get("precio_lista"))
+                price_special = self._to_float(precios.get("precio_especial"))
+                price_discounts = self._to_float(precios.get("precio_descuentos"))
 
                 price_list_mxn = price_list * exchange_rate
                 price_special_mxn = price_special * exchange_rate
