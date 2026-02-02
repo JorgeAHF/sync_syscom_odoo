@@ -14,6 +14,7 @@
         "views/syscom_brand_views.xml",
         "views/syscom_product_views.xml",
         "views/sync_log_views.xml",
+        "views/dashboard.xml",
         "views/menu.xml",
         "data/cron.xml",
     ],
