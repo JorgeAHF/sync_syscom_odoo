@@ -1,41 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
     <data>
-        <record id="view_sync_syscom_dashboard_log" model="ir.ui.view">
-            <field name="name">sync.syscom.dashboard.log</field>
-            <field name="model">sync.syscom.log</field>
-            <field name="arch" type="xml">
-                <list string="Dashboard SyncSyscom" create="false" edit="false">
-                    <header>
-                        <button name="%(server_action_dashboard_sync_categories)d"
-                                type="action"
-                                string="Sync Categorías"
-                                class="btn-secondary"
-                                groups="sync_syscom.group_sync_syscom_manager"/>
-                        <button name="%(server_action_dashboard_sync_brands)d"
-                                type="action"
-                                string="Sync Marcas"
-                                class="btn-secondary"
-                                groups="sync_syscom.group_sync_syscom_manager"/>
-                        <button name="%(server_action_dashboard_sync_models_selected)d"
-                                type="action"
-                                string="Sync Modelos sel."
-                                class="btn-secondary"
-                                groups="sync_syscom.group_sync_syscom_manager"/>
-                        <button name="%(server_action_dashboard_publish_products)d"
-                                type="action"
-                                string="Publicar seleccionados"
-                                class="btn-primary"
-                                groups="sync_syscom.group_sync_syscom_manager"/>
-                    </header>
-                    <field name="create_date"/>
-                    <field name="name"/>
-                    <field name="kind"/>
-                    <field name="message"/>
-                </list>
-            </field>
-        </record>
-
         <!-- Acciones servidor enlazadas al modelo de log para que los botones del header se rendericen -->
         <record id="server_action_dashboard_sync_categories" model="ir.actions.server">
             <field name="name">Dashboard: Sync Categorías</field>
@@ -75,6 +40,41 @@ env["sync.syscom.brand"].action_sync_models_selected()
 env["sync.syscom.product"].action_publish_selected()
             </field>
             <field name="groups_id" eval="[(4, ref('sync_syscom.group_sync_syscom_manager'))]"/>
+        </record>
+
+        <record id="view_sync_syscom_dashboard_log" model="ir.ui.view">
+            <field name="name">sync.syscom.dashboard.log</field>
+            <field name="model">sync.syscom.log</field>
+            <field name="arch" type="xml">
+                <list string="Dashboard SyncSyscom" create="false" edit="false">
+                    <header>
+                        <button name="%(server_action_dashboard_sync_categories)d"
+                                type="action"
+                                string="Sync Categorías"
+                                class="btn-secondary"
+                                groups="sync_syscom.group_sync_syscom_manager"/>
+                        <button name="%(server_action_dashboard_sync_brands)d"
+                                type="action"
+                                string="Sync Marcas"
+                                class="btn-secondary"
+                                groups="sync_syscom.group_sync_syscom_manager"/>
+                        <button name="%(server_action_dashboard_sync_models_selected)d"
+                                type="action"
+                                string="Sync Modelos sel."
+                                class="btn-secondary"
+                                groups="sync_syscom.group_sync_syscom_manager"/>
+                        <button name="%(server_action_dashboard_publish_products)d"
+                                type="action"
+                                string="Publicar seleccionados"
+                                class="btn-primary"
+                                groups="sync_syscom.group_sync_syscom_manager"/>
+                    </header>
+                    <field name="create_date"/>
+                    <field name="name"/>
+                    <field name="kind"/>
+                    <field name="message"/>
+                </list>
+            </field>
         </record>
 
         <record id="action_sync_syscom_dashboard" model="ir.actions.act_window">
