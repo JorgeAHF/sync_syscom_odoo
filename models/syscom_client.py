@@ -42,6 +42,10 @@ class SyscomClient:
     def get_product_detail(self, product_id):
         return self._request("GET", f"/productos/{product_id}")
 
+    def get_exchange_rate(self):
+        """Obtiene tipo de cambio de SYSCOM (/tipocambio)."""
+        return self._request("GET", "/tipocambio")
+
     def _request(self, method, endpoint, timeout_override=None):
         url = f"{self.base_url}/{endpoint.lstrip('/')}"
         headers = {
