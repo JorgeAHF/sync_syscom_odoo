@@ -61,13 +61,6 @@ action = env["sync.syscom.category"].action_start_sync_pipeline()
             groups="sync_syscom.group_sync_syscom_manager"
         />
         <menuitem
-            id="menu_sync_syscom_preview_wizard"
-            name="Previsualizar y publicar"
-            parent="menu_sync_syscom_sync"
-            action="sync_syscom.action_sync_syscom_preview"
-            groups="sync_syscom.group_sync_syscom_manager"
-        />
-        <menuitem
             id="menu_sync_syscom_categories"
             name="Categorías"
             parent="menu_sync_syscom_catalogs"
