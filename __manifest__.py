@@ -15,6 +15,7 @@
         "views/syscom_product_views.xml",
         "views/sync_log_views.xml",
         "views/menu.xml",
+        "views/sync_preview_wizard.xml",
         "data/cron.xml",
     ],
     "installable": True,
