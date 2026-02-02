@@ -26,6 +26,13 @@ action = env["sync.syscom.category"].action_start_sync_pipeline()
             groups="sync_syscom.group_sync_syscom_manager"
         />
         <menuitem
+            id="menu_sync_syscom_dashboard"
+            name="Dashboard"
+            parent="menu_sync_syscom_root"
+            action="action_sync_syscom_dashboard"
+            groups="sync_syscom.group_sync_syscom_manager"
+        />
+        <menuitem
             id="menu_sync_syscom_sync_all"
             name="Categorías/Marcas/Modelos"
             parent="menu_sync_syscom_sync"

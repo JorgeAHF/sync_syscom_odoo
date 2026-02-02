@@ -17,7 +17,7 @@
             <field name="name">sync.syscom.product.list</field>
             <field name="model">sync.syscom.product</field>
             <field name="arch" type="xml">
-                <list string="Modelos SYSCOM" editable="bottom">
+                <list string="Modelos SYSCOM">
                     <header>
                         <button
                             name="%(server_action_publish_syscom_products)d"
@@ -36,6 +36,8 @@
                     <field name="price_list_mxn"/>
                     <field name="price_special"/>
                     <field name="price_special_mxn"/>
+                    <field name="synced_at"/>
+                    <field name="sync_error"/>
                     <field name="active"/>
                 </list>
             </field>

@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+        <record id="view_sync_syscom_dashboard_log" model="ir.ui.view">
+            <field name="name">sync.syscom.dashboard.log</field>
+            <field name="model">sync.syscom.log</field>
+            <field name="arch" type="xml">
+                <list string="Dashboard SyncSyscom" create="false" edit="false">
+                    <header>
+                        <button name="%(server_action_sync_syscom_category)d" type="action" string="Sync Categorías" class="btn-secondary"/>
+                        <button name="%(server_action_sync_syscom_brand)d" type="action" string="Sync Marcas" class="btn-secondary"/>
+                        <button name="%(server_action_sync_syscom_models_selected)d" type="action" string="Sync Modelos sel." class="btn-secondary"/>
+                        <button name="%(server_action_publish_syscom_products)d" type="action" string="Publicar seleccionados" class="btn-primary"/>
+                    </header>
+                    <field name="create_date"/>
+                    <field name="name"/>
+                    <field name="kind"/>
+                    <field name="message"/>
+                </list>
+            </field>
+        </record>
+
+        <record id="action_sync_syscom_dashboard" model="ir.actions.act_window">
+            <field name="name">Dashboard SyncSyscom</field>
+            <field name="res_model">sync.syscom.log</field>
+            <field name="view_id" ref="view_sync_syscom_dashboard_log"/>
+            <field name="view_mode">list</field>
+            <field name="limit">50</field>
+        </record>
+    </data>
+</odoo>

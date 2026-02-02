@@ -52,6 +52,7 @@ class SyscomCategory(models.Model):
     level1_name = fields.Char(string="Nivel 1", compute="_compute_level_names", store=True)
     level2_name = fields.Char(string="Nivel 2", compute="_compute_level_names", store=True)
     level3_name = fields.Char(string="Nivel 3", compute="_compute_level_names", store=True)
+    model_count = fields.Integer(string="# Modelos", compute="_compute_model_count", store=False)
 
     _syscom_id_unique = models.Constraint(
         "unique(syscom_id)",
@@ -89,6 +90,10 @@ class SyscomCategory(models.Model):
             if cat_ids:
                 brands = Brand.search([("category_ids.id", "in", cat_ids)])
             record.brand_ids_tree = brands
+
+    def _compute_model_count(self):
+        for record in self:
+            record.model_count = len(record.product_ids)
 
     def action_sync_syscom(self):
         params = self.env["ir.config_parameter"].sudo()
