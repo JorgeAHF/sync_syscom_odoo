@@ -26,17 +26,38 @@ action = env["sync.syscom.category"].action_start_sync_pipeline()
             groups="sync_syscom.group_sync_syscom_manager"
         />
         <menuitem
-            id="menu_sync_syscom_dashboard"
-            name="Dashboard"
-            parent="menu_sync_syscom_root"
-            action="sync_syscom.action_sync_syscom_dashboard"
-            groups="sync_syscom.group_sync_syscom_manager"
-        />
-        <menuitem
             id="menu_sync_syscom_sync_all"
             name="Categorías/Marcas/Modelos"
             parent="menu_sync_syscom_sync"
             action="server_action_sync_cat_brand_models"
+            groups="sync_syscom.group_sync_syscom_manager"
+        />
+        <menuitem
+            id="menu_sync_syscom_sync_categories"
+            name="Sync Categorías"
+            parent="menu_sync_syscom_sync"
+            action="server_action_sync_syscom_category"
+            groups="sync_syscom.group_sync_syscom_manager"
+        />
+        <menuitem
+            id="menu_sync_syscom_sync_brands"
+            name="Sync Marcas"
+            parent="menu_sync_syscom_sync"
+            action="server_action_sync_syscom_brand"
+            groups="sync_syscom.group_sync_syscom_manager"
+        />
+        <menuitem
+            id="menu_sync_syscom_sync_models_selected"
+            name="Sync Modelos Sel."
+            parent="menu_sync_syscom_sync"
+            action="server_action_sync_syscom_models_selected"
+            groups="sync_syscom.group_sync_syscom_manager"
+        />
+        <menuitem
+            id="menu_sync_syscom_publish_selected"
+            name="Publicar seleccionados"
+            parent="menu_sync_syscom_sync"
+            action="server_action_publish_syscom_products"
             groups="sync_syscom.group_sync_syscom_manager"
         />
         <menuitem
