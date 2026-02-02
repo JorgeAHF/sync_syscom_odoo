@@ -4,13 +4,11 @@
         <record id="pricelist_syscom_list" model="product.pricelist">
             <field name="name">SYSCOM Lista</field>
             <field name="currency_id" ref="base.MXN"/>
-            <field name="discount_policy">without_discount</field>
         </record>
 
         <record id="pricelist_syscom_special" model="product.pricelist">
             <field name="name">SYSCOM Especial</field>
             <field name="currency_id" ref="base.MXN"/>
-            <field name="discount_policy">without_discount</field>
         </record>
     </data>
 </odoo>
