@@ -6,7 +6,6 @@
             <field name="model">sync.syscom.log</field>
             <field name="arch" type="xml">
                 <list string="Logs SYSCOM">
-                    <filter string="Por producto" name="product" domain="[('message','ilike',context.get('sync_log_product_ref',''))]"/>
                     <field name="create_date"/>
                     <field name="name"/>
                     <field name="kind"/>
