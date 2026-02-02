@@ -49,6 +49,93 @@ class SyscomProduct(models.Model):
         "El ID SYSCOM debe ser único.",
     )
 
+    def _get_client(self):
+        """Helper para instanciar SyscomClient con parámetros configurados."""
+        params = self.env["ir.config_parameter"].sudo()
+        token = (params.get_param("sync_syscom.syscom_api_token") or "").strip()
+        if not token:
+            raise UserError("Configura el token en Ajustes antes de sincronizar.")
+        base_url = params.get_param("sync_syscom.syscom_base_url") or "https://developers.syscom.mx/api/v1"
+        timeout = int(params.get_param("sync_syscom.syscom_timeout") or 30)
+        from .syscom_client import SyscomClient
+        return SyscomClient(base_url=base_url, token=token, timeout=timeout)
+
+    def cron_update_exchange_rate(self):
+        """Cron semanal: recalcula precios MXN en staging y plantillas publicadas."""
+        client = self._get_client()
+        rate_payload = client.get_exchange_rate() or {}
+        try:
+            exchange_rate = float(rate_payload.get("una_semana") or rate_payload.get("normal") or 1.0)
+        except Exception:
+            exchange_rate = 1.0
+        exchange_rate_date = fields.Date.context_today(self)
+
+        # Actualizar staging
+        products = self.search([])
+        for prod in products:
+            if prod.price_list is None:
+                continue
+            prod.write({
+                "price_list_mxn": (prod.price_list or 0.0) * exchange_rate,
+                "price_special_mxn": (prod.price_special or 0.0) * exchange_rate,
+                "price_discounts_mxn": (prod.price_discounts or 0.0) * exchange_rate,
+                "exchange_rate": exchange_rate,
+                "exchange_rate_date": exchange_rate_date,
+            })
+
+        # Actualizar plantillas existentes por default_code
+        templates = self.env["product.template"].search([])
+        updated_templates = 0
+        for tmpl in templates:
+            if not tmpl.default_code:
+                continue
+            prod = products.filtered(lambda p: p.model == tmpl.default_code or p.syscom_id == tmpl.default_code)
+            if not prod:
+                continue
+            price_mxn = (prod.price_list or 0.0) * exchange_rate
+            tmpl.write({"list_price": price_mxn})
+            updated_templates += 1
+
+        self.env["sync.syscom.log"].create({
+            "name": "Actualización tipo de cambio SYSCOM",
+            "kind": "info",
+            "message": "Tasa aplicada: %(rate)s. Productos staging: %(p)s. Plantillas actualizadas: %(t)s" % {
+                "rate": exchange_rate,
+                "p": len(products),
+                "t": updated_templates,
+            },
+        })
+
+    def cron_update_stock_selected(self):
+        """Cron diario 1am MX: actualiza existencias de productos seleccionados."""
+        client = self._get_client()
+        selected = self.search([("selected", "=", True)])
+        updated = failed = 0
+        for prod in selected:
+            try:
+                detail = client.get_product_detail(prod.syscom_id) or {}
+                total_existencia = detail.get("total_existencia") or 0
+                existence_json = detail.get("existencia") or {}
+                prod.write({
+                    "total_existencia": total_existencia,
+                    "existence_json": existence_json,
+                    "synced_at": fields.Datetime.now(),
+                    "sync_error": False,
+                })
+                updated += 1
+            except Exception as exc:
+                prod.write({
+                    "sync_error": str(exc),
+                    "synced_at": fields.Datetime.now(),
+                })
+                failed += 1
+
+        self.env["sync.syscom.log"].create({
+            "name": "Actualización diaria de existencias SYSCOM",
+            "kind": "info",
+            "message": "Existencias actualizadas: %(u)s, fallidas: %(f)s" % {"u": updated, "f": failed},
+        })
+
     def action_publish_selected(self):
         """Enriquece productos seleccionados con detalle, convierte MXN y publica en product.template."""
         params = self.env["ir.config_parameter"].sudo()
