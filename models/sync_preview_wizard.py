@@ -88,9 +88,10 @@ class SyncSyscomPreviewWizard(models.TransientModel):
 
     def action_sync_confirm(self):
         self.ensure_one()
-        if not self.line_ids:
-            raise UserError(_("No hay productos para sincronizar."))
-        products = self.line_ids.mapped("product_id")
+        selected_lines = self.line_ids.filtered("selected")
+        if not selected_lines:
+            raise UserError(_("Selecciona al menos un producto en la lista."))
+        products = selected_lines.mapped("product_id")
         products.action_publish_selected()
         return {"type": "ir.actions.act_window_close"}
 
