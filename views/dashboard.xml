@@ -7,22 +7,22 @@
             <field name="arch" type="xml">
                 <list string="Dashboard SyncSyscom" create="false" edit="false">
                     <header>
-                        <button name="%(server_action_sync_syscom_category)d"
+                        <button name="%(server_action_dashboard_sync_categories)d"
                                 type="action"
                                 string="Sync Categorías"
                                 class="btn-secondary"
                                 groups="sync_syscom.group_sync_syscom_manager"/>
-                        <button name="%(server_action_sync_syscom_brand)d"
+                        <button name="%(server_action_dashboard_sync_brands)d"
                                 type="action"
                                 string="Sync Marcas"
                                 class="btn-secondary"
                                 groups="sync_syscom.group_sync_syscom_manager"/>
-                        <button name="%(server_action_sync_syscom_models_selected)d"
+                        <button name="%(server_action_dashboard_sync_models_selected)d"
                                 type="action"
                                 string="Sync Modelos sel."
                                 class="btn-secondary"
                                 groups="sync_syscom.group_sync_syscom_manager"/>
-                        <button name="%(server_action_publish_syscom_products)d"
+                        <button name="%(server_action_dashboard_publish_products)d"
                                 type="action"
                                 string="Publicar seleccionados"
                                 class="btn-primary"
@@ -34,6 +34,55 @@
                     <field name="message"/>
                 </list>
             </field>
+        </record>
+
+        <!-- Acciones servidor enlazadas al modelo de log para que los botones del header se rendericen -->
+        <record id="server_action_dashboard_sync_categories" model="ir.actions.server">
+            <field name="name">Dashboard: Sync Categorías</field>
+            <field name="model_id" ref="model_sync_syscom_log"/>
+            <field name="binding_model_id" ref="model_sync_syscom_log"/>
+            <field name="binding_type">action</field>
+            <field name="state">code</field>
+            <field name="code">
+env["sync.syscom.category"].action_start_sync_pipeline()
+            </field>
+            <field name="groups_id" eval="[(4, ref('sync_syscom.group_sync_syscom_manager'))]"/>
+        </record>
+
+        <record id="server_action_dashboard_sync_brands" model="ir.actions.server">
+            <field name="name">Dashboard: Sync Marcas</field>
+            <field name="model_id" ref="model_sync_syscom_log"/>
+            <field name="binding_model_id" ref="model_sync_syscom_log"/>
+            <field name="binding_type">action</field>
+            <field name="state">code</field>
+            <field name="code">
+env["sync.syscom.brand"].action_start_brand_sync()
+            </field>
+            <field name="groups_id" eval="[(4, ref('sync_syscom.group_sync_syscom_manager'))]"/>
+        </record>
+
+        <record id="server_action_dashboard_sync_models_selected" model="ir.actions.server">
+            <field name="name">Dashboard: Sync Modelos sel.</field>
+            <field name="model_id" ref="model_sync_syscom_log"/>
+            <field name="binding_model_id" ref="model_sync_syscom_log"/>
+            <field name="binding_type">action</field>
+            <field name="state">code</field>
+            <field name="code">
+env["sync.syscom.brand"].action_sync_models_selected()
+            </field>
+            <field name="groups_id" eval="[(4, ref('sync_syscom.group_sync_syscom_manager'))]"/>
+        </record>
+
+        <record id="server_action_dashboard_publish_products" model="ir.actions.server">
+            <field name="name">Dashboard: Publicar seleccionados</field>
+            <field name="model_id" ref="model_sync_syscom_log"/>
+            <field name="binding_model_id" ref="model_sync_syscom_log"/>
+            <field name="binding_type">action</field>
+            <field name="state">code</field>
+            <field name="code">
+env["sync.syscom.product"].action_publish_selected()
+            </field>
+            <field name="groups_id" eval="[(4, ref('sync_syscom.group_sync_syscom_manager'))]"/>
         </record>
 
         <record id="action_sync_syscom_dashboard" model="ir.actions.act_window">
