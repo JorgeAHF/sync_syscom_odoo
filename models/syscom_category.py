@@ -25,6 +25,12 @@ class SyscomCategory(models.Model):
         "parent_id",
         string="Subcategorías",
     )
+    product_category_id = fields.Many2one(
+        "product.category",
+        string="Categoría Odoo",
+        ondelete="set null",
+        help="Categoría equivalente en Odoo para asignar a productos publicados.",
+    )
     brand_ids = fields.Many2many(
         "sync.syscom.brand",
         "sync_syscom_brand_category_rel",

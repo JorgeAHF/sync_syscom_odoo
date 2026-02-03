@@ -23,6 +23,31 @@ class SyscomProduct(models.Model):
         categories = categories.sorted(key=lambda c: c.level or 0, reverse=True)
         return categories[0] if categories else None
 
+    def _ensure_product_category(self, syscom_category):
+        """Create/link a product.category matching the SYSCOM category tree."""
+        if not syscom_category:
+            return None
+        syscom_category = syscom_category.sudo()
+        if syscom_category.product_category_id:
+            return syscom_category.product_category_id
+
+        parent_product_category = None
+        if syscom_category.parent_id:
+            parent_product_category = self._ensure_product_category(syscom_category.parent_id)
+
+        ProductCategory = self.env["product.category"].sudo()
+        domain = [("name", "=", syscom_category.name)]
+        domain.append(("parent_id", "=", parent_product_category.id if parent_product_category else False))
+        product_category = ProductCategory.search(domain, limit=1)
+        if not product_category:
+            vals = {"name": syscom_category.name}
+            if parent_product_category:
+                vals["parent_id"] = parent_product_category.id
+            product_category = ProductCategory.create(vals)
+
+        syscom_category.write({"product_category_id": product_category.id})
+        return product_category
+
     def _update_template_pricelists_and_cost(self, template, prices_mxn, params):
         """Update pricelists (list, special, discount) and standard_price."""
         pricelist_list_id = int(params.get_param("sync_syscom.pricelist_list_id") or 0)
@@ -173,13 +198,6 @@ class SyscomProduct(models.Model):
     )
 
 
-class ProductTemplate(models.Model):
-    _inherit = "product.template"
-
-    syscom_cost_margin_pct = fields.Float(
-        string="Margen costo SYSCOM (%)",
-        help="Porcentaje de descuento aplicado sobre precio especial SYSCOM para calcular el costo.",
-    )
     def _get_client(self):
         """Helper para instanciar SyscomClient con parámetros configurados."""
         params = self.env["ir.config_parameter"].sudo()
@@ -454,7 +472,9 @@ class ProductTemplate(models.Model):
                 # Categoría Odoo (más profunda)
                 deepest_cat = self._get_deepest_category(cat_ids)
                 if deepest_cat:
-                    template.categ_id = deepest_cat.id
+                    product_category = self._ensure_product_category(deepest_cat)
+                    if product_category:
+                        template.categ_id = product_category.id
 
                 # Actualizar listas de precios SYSCOM + costo
                 self._update_template_pricelists_and_cost(template, {
@@ -495,3 +515,12 @@ class ProductTemplate(models.Model):
                 "sticky": False,
             },
         }
+
+
+class ProductTemplate(models.Model):
+    _inherit = "product.template"
+
+    syscom_cost_margin_pct = fields.Float(
+        string="Margen costo SYSCOM (%)",
+        help="Porcentaje de descuento aplicado sobre precio especial SYSCOM para calcular el costo.",
+    )
