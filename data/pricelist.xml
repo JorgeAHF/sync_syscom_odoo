@@ -10,5 +10,10 @@
             <field name="name">SYSCOM Especial</field>
             <field name="currency_id" ref="base.MXN"/>
         </record>
+
+        <record id="pricelist_syscom_discount" model="product.pricelist">
+            <field name="name">SYSCOM Descuento</field>
+            <field name="currency_id" ref="base.MXN"/>
+        </record>
     </data>
 </odoo>

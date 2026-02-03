@@ -55,10 +55,23 @@
                                             </div>
                                         </div>
                                         <div class="row mt8">
+                                            <label class="col-lg-4 o_light_label" for="syscom_pricelist_discount"/>
+                                            <div class="col-lg-8">
+                                                <field name="syscom_pricelist_discount" options="{'no_create': True}"/>
+                                            </div>
+                                        </div>
+                                        <div class="row mt8">
                                             <label class="col-lg-4 o_light_label" for="syscom_min_stock"/>
                                             <div class="col-lg-8">
                                                 <field name="syscom_min_stock" class="oe_inline"/>
                                                 <span class="text-muted ms-2">Cantidad mínima en SYSCOM para publicar productos (>=1).</span>
+                                            </div>
+                                        </div>
+                                        <div class="row mt8">
+                                            <label class="col-lg-4 o_light_label" for="syscom_cost_discount_pct"/>
+                                            <div class="col-lg-8">
+                                                <field name="syscom_cost_discount_pct" class="oe_inline"/>
+                                                <span class="text-muted ms-2">% sobre precio especial para calcular costo.</span>
                                             </div>
                                         </div>
                                         <div class="row mt16">

@@ -15,6 +15,121 @@ class SyscomProduct(models.Model):
         except (TypeError, ValueError):
             return 0.0
 
+    def _get_deepest_category(self, cat_ids):
+        """Return the category (sync.syscom.category) with highest level; fallback first."""
+        if not cat_ids:
+            return None
+        categories = self.env["sync.syscom.category"].browse(cat_ids)
+        categories = categories.sorted(key=lambda c: c.level or 0, reverse=True)
+        return categories[0] if categories else None
+
+    def _update_template_pricelists_and_cost(self, template, prices_mxn, params):
+        """Update pricelists (list, special, discount) and standard_price."""
+        pricelist_list_id = int(params.get_param("sync_syscom.pricelist_list_id") or 0)
+        pricelist_special_id = int(params.get_param("sync_syscom.pricelist_special_id") or 0)
+        pricelist_discount_id = int(params.get_param("sync_syscom.pricelist_discount_id") or 0)
+        cost_pct = float(params.get_param("sync_syscom.cost_discount_pct") or 4.0)
+        PricelistItem = self.env["product.pricelist.item"].sudo()
+
+        def upsert(pricelist_id, price):
+            if not pricelist_id:
+                return
+            item = PricelistItem.search([
+                ("pricelist_id", "=", pricelist_id),
+                ("product_tmpl_id", "=", template.id),
+                ("applied_on", "=", "1_product"),
+            ], limit=1)
+            vals_item = {
+                "pricelist_id": pricelist_id,
+                "applied_on": "1_product",
+                "product_tmpl_id": template.id,
+                "compute_price": "fixed",
+                "fixed_price": price,
+            }
+            if item:
+                item.write({"fixed_price": price})
+            else:
+                PricelistItem.create(vals_item)
+
+        upsert(pricelist_list_id, prices_mxn.get("list_price_mxn", 0.0))
+        upsert(pricelist_special_id, prices_mxn.get("special_price_mxn", 0.0))
+        upsert(pricelist_discount_id, prices_mxn.get("discount_price_mxn", 0.0))
+
+        # costo (standard_price)
+        cost = prices_mxn.get("special_price_mxn", 0.0) * (1 - cost_pct / 100.0)
+        vals_cost = {"standard_price": cost}
+        if template._fields.get("syscom_cost_margin_pct"):
+            vals_cost["syscom_cost_margin_pct"] = cost_pct
+        template.sudo().write(vals_cost)
+
+    def _sync_template_media_and_resources(self, template, detail):
+        """Sync images and resource links from SYSCOM detail into product.template."""
+        Image = self.env["product.image"].sudo()
+        Attachment = self.env["ir.attachment"].sudo()
+
+        images = detail.get("imágenes") or detail.get("imagenes") or []
+        resources = detail.get("recursos") or []
+
+        # Imágenes: primera a image_1920, todas a product.image
+        if images:
+            first_url = images[0]
+            if isinstance(first_url, dict):
+                first_url = first_url.get("url") or first_url.get("imagen")
+            if first_url:
+                try:
+                    import base64, requests
+                    resp = requests.get(first_url, timeout=10)
+                    if resp.ok:
+                        template.image_1920 = base64.b64encode(resp.content)
+                except Exception:
+                    pass
+
+        existing_images = Image.search([("product_tmpl_id", "=", template.id), ("name", "like", "SYSCOM %")])
+        existing_images.unlink()
+
+        seq = 1
+        for img in images:
+            url = img
+            if isinstance(img, dict):
+                url = img.get("url") or img.get("imagen")
+            if not url:
+                continue
+            try:
+                import base64, requests
+                resp = requests.get(url, timeout=10)
+                if not resp.ok:
+                    continue
+                Image.create({
+                    "product_tmpl_id": template.id,
+                    "name": f"SYSCOM {seq}",
+                    "sequence": seq,
+                    "image_1920": base64.b64encode(resp.content),
+                })
+                seq += 1
+            except Exception:
+                continue
+
+        # Recursos: crear attachments url si no existen
+        for res in resources:
+            url = res.get("url") if isinstance(res, dict) else None
+            name = res.get("nombre") or res.get("titulo") or res.get("name") or url if isinstance(res, dict) else None
+            if not url:
+                continue
+            exists = Attachment.search([
+                ("res_model", "=", "product.template"),
+                ("res_id", "=", template.id),
+                ("url", "=", url),
+            ], limit=1)
+            if exists:
+                continue
+            Attachment.create({
+                "name": name or "Recurso SYSCOM",
+                "type": "url",
+                "url": url,
+                "res_model": "product.template",
+                "res_id": template.id,
+            })
+
     name = fields.Char(string="Nombre", required=True)
     syscom_id = fields.Char(string="ID SYSCOM", required=True, index=True)
     model = fields.Char(string="Modelo", index=True)
@@ -57,6 +172,14 @@ class SyscomProduct(models.Model):
         "El ID SYSCOM debe ser único.",
     )
 
+
+class ProductTemplate(models.Model):
+    _inherit = "product.template"
+
+    syscom_cost_margin_pct = fields.Float(
+        string="Margen costo SYSCOM (%)",
+        help="Porcentaje de descuento aplicado sobre precio especial SYSCOM para calcular el costo.",
+    )
     def _get_client(self):
         """Helper para instanciar SyscomClient con parámetros configurados."""
         params = self.env["ir.config_parameter"].sudo()
@@ -125,13 +248,40 @@ class SyscomProduct(models.Model):
         params = self.env["ir.config_parameter"].sudo()
         location = self.env.ref("sync_syscom.stock_location_syscom", raise_if_not_found=False)
         quant_model = self.env["stock.quant"]
+        rate_payload = client.get_exchange_rate() or {}
+        try:
+            exchange_rate = float(rate_payload.get("una_semana") or rate_payload.get("normal") or 1.0)
+        except Exception:
+            exchange_rate = 1.0
+        price_currency = params.get_param("sync_syscom.price_currency") or "usd"
         for prod in selected:
             try:
                 detail = client.get_product_detail(prod.syscom_id) or {}
                 total_existencia = detail.get("total_existencia") or 0
                 existence_json = detail.get("existencia") or {}
+                precios = detail.get("precios") or {}
+                price_list = self._to_float(precios.get("precio_lista"))
+                price_special = self._to_float(precios.get("precio_especial"))
+                price_discounts = self._to_float(precios.get("precio_descuentos"))
+                if price_currency == "usd":
+                    price_list_mxn = price_list * exchange_rate
+                    price_special_mxn = price_special * exchange_rate
+                    price_discounts_mxn = price_discounts * exchange_rate
+                else:
+                    price_list_mxn = price_list
+                    price_special_mxn = price_special
+                    price_discounts_mxn = price_discounts
+
                 prod.write({
                     "total_existencia": total_existencia,
+                    "price_list": price_list,
+                    "price_special": price_special,
+                    "price_discounts": price_discounts,
+                    "price_list_mxn": price_list_mxn,
+                    "price_special_mxn": price_special_mxn,
+                    "price_discounts_mxn": price_discounts_mxn,
+                    "exchange_rate": exchange_rate,
+                    "exchange_rate_date": fields.Date.context_today(self),
                     "existence_json": existence_json,
                     "synced_at": fields.Datetime.now(),
                     "sync_error": False,
@@ -143,15 +293,22 @@ class SyscomProduct(models.Model):
                         limit=1,
                     )
                     if product_template:
+                        product_variant = product_template.product_variant_id
+                        # Precios y costo también en cron
+                        self._update_template_pricelists_and_cost(product_template, {
+                            "list_price_mxn": price_list_mxn,
+                            "special_price_mxn": price_special_mxn,
+                            "discount_price_mxn": price_discounts_mxn,
+                        }, params)
                         quant = quant_model.sudo().search([
-                            ("product_tmpl_id", "=", product_template.id),
+                            ("product_id", "=", product_variant.id),
                             ("location_id", "=", location.id),
                         ], limit=1)
                         if quant:
                             quant.sudo().write({"quantity": total_existencia})
                         else:
                             quant_model.sudo().create({
-                                "product_tmpl_id": product_template.id,
+                                "product_id": product_variant.id,
                                 "location_id": location.id,
                                 "quantity": total_existencia,
                             })
@@ -285,7 +442,7 @@ class SyscomProduct(models.Model):
                     "name": name,
                     "default_code": default_code,
                     "list_price": price_list_mxn,
-                    "description_sale": description + (f"\\nLink: {link}" if link else ""),
+                    "website_description": description,
                 }
                 if template:
                     template.write(template_vals)
@@ -294,31 +451,20 @@ class SyscomProduct(models.Model):
                     template = self.env["product.template"].create(template_vals)
                     created += 1
 
-                # Actualizar listas de precios SYSCOM si están configuradas
-                pricelist_items = []
-                if pricelist_list_id:
-                    pricelist_items.append((pricelist_list_id, price_list_mxn))
-                if pricelist_special_id:
-                    pricelist_items.append((pricelist_special_id, price_special_mxn))
+                # Categoría Odoo (más profunda)
+                deepest_cat = self._get_deepest_category(cat_ids)
+                if deepest_cat:
+                    template.categ_id = deepest_cat.id
 
-                for plist_id, price in pricelist_items:
-                    # Update or create per product tmpl
-                    existing_item = self.env["product.pricelist.item"].sudo().search([
-                        ("pricelist_id", "=", plist_id),
-                        ("product_tmpl_id", "=", template.id),
-                        ("applied_on", "=", "1_product"),
-                    ], limit=1)
-                    vals_item = {
-                        "pricelist_id": plist_id,
-                        "applied_on": "1_product",
-                        "product_tmpl_id": template.id,
-                        "compute_price": "fixed",
-                        "fixed_price": price,
-                    }
-                    if existing_item:
-                        existing_item.write({"fixed_price": price})
-                    else:
-                        self.env["product.pricelist.item"].sudo().create(vals_item)
+                # Actualizar listas de precios SYSCOM + costo
+                self._update_template_pricelists_and_cost(template, {
+                    "list_price_mxn": price_list_mxn,
+                    "special_price_mxn": price_special_mxn,
+                    "discount_price_mxn": price_discounts_mxn,
+                }, params)
+
+                # Imágenes y recursos
+                self._sync_template_media_and_resources(template, detail)
 
             except Exception as exc:
                 failed += 1

@@ -42,12 +42,25 @@ class ResConfigSettings(models.TransientModel):
         default=lambda self: self.env.ref("sync_syscom.pricelist_syscom_special", raise_if_not_found=False),
         help="Lista de precios donde se guardará el precio especial de SYSCOM (MXN).",
     )
+    syscom_pricelist_discount = fields.Many2one(
+        "product.pricelist",
+        string="Pricelist descuento SYSCOM",
+        config_parameter="sync_syscom.pricelist_discount_id",
+        default=lambda self: self.env.ref("sync_syscom.pricelist_syscom_discount", raise_if_not_found=False),
+        help="Lista de precios donde se guardará el precio con descuentos de SYSCOM (MXN).",
+    )
     syscom_price_currency = fields.Selection(
         [("usd", "USD (convertir a MXN)"), ("mxn", "MXN (no convertir)")],
         string="Moneda origen de precios SYSCOM",
         default="usd",
         config_parameter="sync_syscom.price_currency",
         help="Controla si los precios traídos se convierten con el tipo de cambio o ya vienen en MXN.",
+    )
+    syscom_cost_discount_pct = fields.Float(
+        string="Descuento % sobre precio especial para costo",
+        default=4.0,
+        config_parameter="sync_syscom.cost_discount_pct",
+        help="Porcentaje de descuento aplicado al precio especial para calcular el costo (standard_price).",
     )
 
     def action_syscom_test_connection(self):
