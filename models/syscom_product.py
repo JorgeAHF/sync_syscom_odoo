@@ -111,6 +111,41 @@ class SyscomProduct(models.Model):
             vals_cost["syscom_cost_margin_pct"] = cost_pct
         template.sudo().write(vals_cost)
 
+    def _sync_template_unspsc_from_sat(self, template, sat_key, sat_description=None):
+        """Set UNSPSC Category (Many2one) on product.template using SYSCOM sat_key.
+
+        If the UNSPSC field/model isn't available in this DB, do nothing (per requirements).
+        """
+        sat_key = (sat_key or "").strip()
+        if not sat_key:
+            return
+
+        # Find the UNSPSC M2O field on product.template (it exists only when UNSPSC feature/module is present).
+        unspsc_field_name = None
+        for fname, field in template._fields.items():
+            if field.type == "many2one" and getattr(field, "comodel_name", None) == "product.unspsc.code":
+                unspsc_field_name = fname
+                break
+        if not unspsc_field_name:
+            return
+
+        Unspsc = self.env["product.unspsc.code"].sudo()
+        if "code" not in Unspsc._fields:
+            # Unexpected model shape; safer to do nothing.
+            return
+
+        unspsc = Unspsc.search([("code", "=", sat_key)], limit=1)
+        if not unspsc:
+            vals = {"code": sat_key}
+            if sat_description and "name" in Unspsc._fields:
+                vals["name"] = sat_description
+            unspsc = Unspsc.create(vals)
+        elif sat_description and "name" in Unspsc._fields and not (unspsc.name or "").strip():
+            # Enrich existing record name if missing.
+            unspsc.write({"name": sat_description})
+
+        template.sudo().write({unspsc_field_name: unspsc.id})
+
     def _sync_template_media_and_resources(self, template, detail):
         """Sync images and resource links from SYSCOM detail into product.template."""
         Image = self.env["product.image"].sudo()
@@ -301,6 +336,8 @@ class SyscomProduct(models.Model):
                 detail = client.get_product_detail(prod.syscom_id) or {}
                 total_existencia = detail.get("total_existencia") or 0
                 existence_json = detail.get("existencia") or {}
+                sat_key = detail.get("sat_key") or detail.get("sat") or ""
+                sat_description = detail.get("sat_description") or ""
                 precios = detail.get("precios") or {}
                 price_list = self._to_float(precios.get("precio_lista"))
                 price_special = self._to_float(precios.get("precio_especial"))
@@ -318,6 +355,7 @@ class SyscomProduct(models.Model):
 
                 prod.write({
                     "total_existencia": total_existencia,
+                    "sat_key": sat_key,
                     "price_list": price_list,
                     "price_special": price_special,
                     "price_discounts": price_discounts,
@@ -344,6 +382,8 @@ class SyscomProduct(models.Model):
                             "special_price_mxn": price_special_mxn,
                             "discount_price_mxn": price_discounts_mxn,
                         }, params)
+                        # UNSPSC from SAT key (if available)
+                        self._sync_template_unspsc_from_sat(product_template, sat_key, sat_description)
                         quant = quant_model.sudo().search([
                             ("product_id", "=", product_variant.id),
                             ("location_id", "=", location.id),
@@ -424,6 +464,7 @@ class SyscomProduct(models.Model):
                 link = detail.get("link") or product.link
                 total_existencia = detail.get("total_existencia") or 0
                 sat_key = detail.get("sat_key") or detail.get("sat") or ""
+                sat_description = detail.get("sat_description") or ""
                 image_url = detail.get("img_portada") or product.image_url or ""
                 brand_logo_url = detail.get("marca_logo") or ""
                 existence_json = detail.get("existencia") or {}
@@ -503,6 +544,9 @@ class SyscomProduct(models.Model):
                     product_category = self._ensure_product_category(deepest_cat)
                     if product_category:
                         template.categ_id = product_category.id
+
+                # UNSPSC Category (for CFDI) from SYSCOM sat_key; do nothing if field isn't present.
+                self._sync_template_unspsc_from_sat(template, sat_key, sat_description)
 
                 # Actualizar listas de precios SYSCOM + costo
                 self._update_template_pricelists_and_cost(template, {
