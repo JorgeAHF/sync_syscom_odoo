@@ -304,7 +304,9 @@ class SyscomProduct(models.Model):
                 precios = detail.get("precios") or {}
                 price_list = self._to_float(precios.get("precio_lista"))
                 price_special = self._to_float(precios.get("precio_especial"))
-                price_discounts = self._to_float(precios.get("precio_descuentos"))
+                # SYSCOM returns "precio_descuento" (singular) in /productos/{id}.
+                # Keep backward compatibility with a potential plural key.
+                price_discounts = self._to_float(precios.get("precio_descuento") or precios.get("precio_descuentos"))
                 if price_currency == "usd":
                     price_list_mxn = price_list * exchange_rate
                     price_special_mxn = price_special * exchange_rate
@@ -403,7 +405,9 @@ class SyscomProduct(models.Model):
                 precios = detail.get("precios") or {}
                 price_list = self._to_float(precios.get("precio_lista"))
                 price_special = self._to_float(precios.get("precio_especial"))
-                price_discounts = self._to_float(precios.get("precio_descuentos"))
+                # SYSCOM returns "precio_descuento" (singular) in /productos/{id}.
+                # Keep backward compatibility with a potential plural key.
+                price_discounts = self._to_float(precios.get("precio_descuento") or precios.get("precio_descuentos"))
 
                 if price_currency == "usd":
                     price_list_mxn = price_list * exchange_rate
