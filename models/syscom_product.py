@@ -150,6 +150,7 @@ class SyscomProduct(models.Model):
         """Sync images and resource links from SYSCOM detail into product.template."""
         Image = self.env["product.image"].sudo()
         Attachment = self.env["ir.attachment"].sudo()
+        ProductDocument = self.env["product.document"].sudo() if "product.document" in self.env.registry.models else None
 
         images = detail.get("imágenes") or detail.get("imagenes") or []
         resources = detail.get("recursos") or []
@@ -193,26 +194,61 @@ class SyscomProduct(models.Model):
             except Exception:
                 continue
 
-        # Recursos: crear attachments url si no existen
+        # Recursos:
+        # Prefer Odoo "Documentos del producto" so links appear on the website product page.
+        # Fall back to ir.attachment(url) if product.document is not available in this DB.
         for res in resources:
-            url = res.get("url") if isinstance(res, dict) else None
-            name = res.get("nombre") or res.get("titulo") or res.get("name") or url if isinstance(res, dict) else None
+            if not isinstance(res, dict):
+                continue
+            # SYSCOM returns {"recurso": "...", "path": "http://...pdf"} in /productos/{id}
+            url = (res.get("path") or res.get("url") or "").strip()
+            name = (res.get("recurso") or res.get("nombre") or res.get("titulo") or res.get("name") or "").strip()
             if not url:
                 continue
-            exists = Attachment.search([
-                ("res_model", "=", "product.template"),
-                ("res_id", "=", template.id),
-                ("url", "=", url),
-            ], limit=1)
-            if exists:
-                continue
-            Attachment.create({
-                "name": name or "Recurso SYSCOM",
-                "type": "url",
-                "url": url,
-                "res_model": "product.template",
-                "res_id": template.id,
-            })
+            if ProductDocument:
+                doc = ProductDocument.search([
+                    ("res_model", "=", "product.template"),
+                    ("res_id", "=", template.id),
+                    ("type", "=", "url"),
+                    ("url", "=", url),
+                ], limit=1)
+                if doc:
+                    update_vals = {}
+                    if name and (doc.name or "").strip() != name:
+                        update_vals["name"] = name
+                    if not doc.shown_on_product_page:
+                        update_vals["shown_on_product_page"] = True
+                    if not doc.public:
+                        update_vals["public"] = True
+                    if update_vals:
+                        doc.write(update_vals)
+                else:
+                    ProductDocument.create({
+                        "name": name or "Recurso SYSCOM",
+                        "type": "url",
+                        "url": url,
+                        "res_model": "product.template",
+                        "res_id": template.id,
+                        "shown_on_product_page": True,
+                        "public": True,
+                        "description": "SYSCOM",
+                    })
+            else:
+                exists = Attachment.search([
+                    ("res_model", "=", "product.template"),
+                    ("res_id", "=", template.id),
+                    ("type", "=", "url"),
+                    ("url", "=", url),
+                ], limit=1)
+                if exists:
+                    continue
+                Attachment.create({
+                    "name": name or "Recurso SYSCOM",
+                    "type": "url",
+                    "url": url,
+                    "res_model": "product.template",
+                    "res_id": template.id,
+                })
 
     name = fields.Char(string="Nombre", required=True)
     syscom_id = fields.Char(string="ID SYSCOM", required=True, index=True)
