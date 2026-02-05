@@ -147,6 +147,32 @@ class SyscomProduct(models.Model):
 
         template.sudo().write({unspsc_field_name: unspsc.id})
 
+    def _ensure_template_published_on_website(self, template):
+        """Publish product on website (eCommerce) if the field exists.
+
+        Requirement: SYSCOM products should be published automatically.
+        If website/eCommerce isn't installed, this becomes a no-op.
+        """
+        if not template:
+            return
+        vals = {}
+        # website.published.mixin in modern Odoo
+        if "is_published" in template._fields and not template.is_published:
+            vals["is_published"] = True
+        # Backward compatibility for other editions/customizations
+        if "website_published" in template._fields and not getattr(template, "website_published", False):
+            vals["website_published"] = True
+        # If multi-website is enabled and website_id exists, set a default website.
+        if "website_id" in template._fields and not template.website_id:
+            try:
+                website = self.env["website"].sudo().search([], limit=1)
+            except Exception:
+                website = None
+            if website:
+                vals["website_id"] = website.id
+        if vals:
+            template.sudo().write(vals)
+
     def _sync_template_media_and_resources(self, template, detail):
         """Sync images and resource links from SYSCOM detail into product.template."""
         Image = self.env["product.image"].sudo()
@@ -644,6 +670,8 @@ class SyscomProduct(models.Model):
 
                 # Imágenes y recursos
                 self._sync_template_media_and_resources(template, detail)
+                # Publicar en eCommerce automáticamente (si aplica)
+                self._ensure_template_published_on_website(template)
 
             except Exception as exc:
                 failed += 1
