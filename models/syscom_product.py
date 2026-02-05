@@ -267,7 +267,7 @@ class SyscomProduct(models.Model):
                         update_vals["website_id"] = website.id
                     if update_vals:
                         doc.write(update_vals)
-                    # product.document.public may be linked to the delegated ir.attachment.public; enforce both.
+                    # product.document.public may be linked to the delegated ir.attachment.public; enforce both..
                     if doc.ir_attachment_id:
                         att_vals = {}
                         if hasattr(doc.ir_attachment_id, "public") and not doc.ir_attachment_id.public:
