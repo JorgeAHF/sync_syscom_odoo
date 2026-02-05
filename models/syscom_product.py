@@ -50,9 +50,33 @@ class SyscomProduct(models.Model):
 
     def _update_template_pricelists_and_cost(self, template, prices_mxn, params):
         """Update pricelists (list, special, discount) and standard_price."""
-        pricelist_list_id = int(params.get_param("sync_syscom.pricelist_list_id") or 0)
-        pricelist_special_id = int(params.get_param("sync_syscom.pricelist_special_id") or 0)
-        pricelist_discount_id = int(params.get_param("sync_syscom.pricelist_discount_id") or 0)
+
+        def _config_pricelist_id(param_key, fallback_xmlid):
+            """Return configured pricelist id, falling back to the module's XMLID if unset.
+
+            This makes pricelist updates work even if the user hasn't opened/saved Settings yet.
+            """
+            val = params.get_param(param_key)
+            try:
+                if val:
+                    return int(val)
+            except Exception:
+                pass
+            ref = self.env.ref(fallback_xmlid, raise_if_not_found=False)
+            return int(ref.id) if ref else 0
+
+        pricelist_list_id = _config_pricelist_id(
+            "sync_syscom.pricelist_list_id",
+            "sync_syscom.pricelist_syscom_list",
+        )
+        pricelist_special_id = _config_pricelist_id(
+            "sync_syscom.pricelist_special_id",
+            "sync_syscom.pricelist_syscom_special",
+        )
+        pricelist_discount_id = _config_pricelist_id(
+            "sync_syscom.pricelist_discount_id",
+            "sync_syscom.pricelist_syscom_discount",
+        )
         cost_pct = float(params.get_param("sync_syscom.cost_discount_pct") or 4.0)
         PricelistItem = self.env["product.pricelist.item"].sudo()
 
