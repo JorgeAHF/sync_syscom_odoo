@@ -220,10 +220,15 @@ class SyscomProduct(models.Model):
                         update_vals["shown_on_product_page"] = True
                     if not doc.public:
                         update_vals["public"] = True
+                    # If multi-website is enabled, pin it to a website when empty so it can be published.
+                    if "website_id" in doc._fields and not doc.website_id:
+                        website = self.env["website"].sudo().search([], limit=1) if "website" in self.env.registry.models else None
+                        if website:
+                            update_vals["website_id"] = website.id
                     if update_vals:
                         doc.write(update_vals)
                 else:
-                    ProductDocument.create({
+                    vals_doc = {
                         "name": name or "Recurso SYSCOM",
                         "type": "url",
                         "url": url,
@@ -232,7 +237,12 @@ class SyscomProduct(models.Model):
                         "shown_on_product_page": True,
                         "public": True,
                         "description": "SYSCOM",
-                    })
+                    }
+                    if "website_id" in ProductDocument._fields:
+                        website = self.env["website"].sudo().search([], limit=1) if "website" in self.env.registry.models else None
+                        if website:
+                            vals_doc["website_id"] = website.id
+                    ProductDocument.create(vals_doc)
             else:
                 exists = Attachment.search([
                     ("res_model", "=", "product.template"),
