@@ -251,7 +251,20 @@ class SyscomProduct(models.Model):
                         website = self.env["website"].sudo().search([], limit=1) if "website" in self.env.registry.models else None
                         if website:
                             vals_doc["website_id"] = website.id
-                    ProductDocument.create(vals_doc)
+                    doc = ProductDocument.create(vals_doc)
+                    # Some setups override create() and keep documents private by default.
+                    # Force the publication flags after create to match the business requirement.
+                    force_vals = {}
+                    if not doc.shown_on_product_page:
+                        force_vals["shown_on_product_page"] = True
+                    if not doc.public:
+                        force_vals["public"] = True
+                    if "website_id" in doc._fields and not doc.website_id:
+                        website = self.env["website"].sudo().search([], limit=1) if "website" in self.env.registry.models else None
+                        if website:
+                            force_vals["website_id"] = website.id
+                    if force_vals:
+                        doc.write(force_vals)
             else:
                 exists = Attachment.search([
                     ("res_model", "=", "product.template"),
