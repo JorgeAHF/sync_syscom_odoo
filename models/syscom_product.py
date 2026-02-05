@@ -1,5 +1,6 @@
 from odoo import fields, models
 from odoo.exceptions import UserError
+from urllib.parse import urlparse, urlunparse
 
 
 class SyscomProduct(models.Model):
@@ -202,6 +203,14 @@ class SyscomProduct(models.Model):
                 continue
             # SYSCOM returns {"recurso": "...", "path": "http://...pdf"} in /productos/{id}
             url = (res.get("path") or res.get("url") or "").strip()
+            # Browsers may block "insecure downloads" from an https website when the file URL is http.
+            # SYSCOM often returns http://ftp*.syscom.mx/...; if https is available, prefer it.
+            try:
+                parsed = urlparse(url)
+                if parsed.scheme == "http" and parsed.netloc.endswith("syscom.mx") and parsed.netloc.startswith("ftp"):
+                    url = urlunparse(parsed._replace(scheme="https"))
+            except Exception:
+                pass
             name = (res.get("recurso") or res.get("nombre") or res.get("titulo") or res.get("name") or "").strip()
             if not url:
                 continue
