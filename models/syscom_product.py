@@ -215,6 +215,14 @@ class SyscomProduct(models.Model):
             if not url:
                 continue
             if ProductDocument:
+                # Pick a website to publish on (best effort). Some Odoo setups require website_id
+                # to be set for public documents to be effectively published.
+                website = None
+                try:
+                    website = self.env["website"].sudo().search([], limit=1)
+                except Exception:
+                    website = None
+
                 doc = ProductDocument.search([
                     ("res_model", "=", "product.template"),
                     ("res_id", "=", template.id),
@@ -229,13 +237,19 @@ class SyscomProduct(models.Model):
                         update_vals["shown_on_product_page"] = True
                     if not doc.public:
                         update_vals["public"] = True
-                    # If multi-website is enabled, pin it to a website when empty so it can be published.
-                    if "website_id" in doc._fields and not doc.website_id:
-                        website = self.env["website"].sudo().search([], limit=1) if "website" in self.env.registry.models else None
-                        if website:
-                            update_vals["website_id"] = website.id
+                    if "website_id" in doc._fields and not doc.website_id and website:
+                        update_vals["website_id"] = website.id
                     if update_vals:
                         doc.write(update_vals)
+                    # product.document.public may be linked to the delegated ir.attachment.public; enforce both.
+                    if doc.ir_attachment_id:
+                        att_vals = {}
+                        if hasattr(doc.ir_attachment_id, "public") and not doc.ir_attachment_id.public:
+                            att_vals["public"] = True
+                        if hasattr(doc.ir_attachment_id, "website_id") and not doc.ir_attachment_id.website_id and website:
+                            att_vals["website_id"] = website.id
+                        if att_vals:
+                            doc.ir_attachment_id.sudo().write(att_vals)
                 else:
                     vals_doc = {
                         "name": name or "Recurso SYSCOM",
@@ -247,10 +261,8 @@ class SyscomProduct(models.Model):
                         "public": True,
                         "description": "SYSCOM",
                     }
-                    if "website_id" in ProductDocument._fields:
-                        website = self.env["website"].sudo().search([], limit=1) if "website" in self.env.registry.models else None
-                        if website:
-                            vals_doc["website_id"] = website.id
+                    if "website_id" in ProductDocument._fields and website:
+                        vals_doc["website_id"] = website.id
                     doc = ProductDocument.create(vals_doc)
                     # Some setups override create() and keep documents private by default.
                     # Force the publication flags after create to match the business requirement.
@@ -259,12 +271,19 @@ class SyscomProduct(models.Model):
                         force_vals["shown_on_product_page"] = True
                     if not doc.public:
                         force_vals["public"] = True
-                    if "website_id" in doc._fields and not doc.website_id:
-                        website = self.env["website"].sudo().search([], limit=1) if "website" in self.env.registry.models else None
-                        if website:
-                            force_vals["website_id"] = website.id
+                    if "website_id" in doc._fields and not doc.website_id and website:
+                        force_vals["website_id"] = website.id
                     if force_vals:
                         doc.write(force_vals)
+                    # Enforce delegated attachment flags too (this is what actually drives public access).
+                    if doc.ir_attachment_id:
+                        att_vals = {}
+                        if hasattr(doc.ir_attachment_id, "public") and not doc.ir_attachment_id.public:
+                            att_vals["public"] = True
+                        if hasattr(doc.ir_attachment_id, "website_id") and not doc.ir_attachment_id.website_id and website:
+                            att_vals["website_id"] = website.id
+                        if att_vals:
+                            doc.ir_attachment_id.sudo().write(att_vals)
             else:
                 exists = Attachment.search([
                     ("res_model", "=", "product.template"),
