@@ -270,7 +270,12 @@ class SyscomProduct(models.Model):
         docs = template.sudo().product_document_ids
         if not docs:
             return
-        for doc in docs.sudo():
+        url_docs = docs.sudo().filtered(lambda d: getattr(d, "type", None) == "url")
+        if not url_docs:
+            return
+
+        # ORM enforcement first (respects _inherits/related fields)
+        for doc in url_docs:
             if getattr(doc, "type", None) != "url":
                 continue
             vals = {}
@@ -291,6 +296,41 @@ class SyscomProduct(models.Model):
                     att_vals["website_id"] = False
                 if att_vals:
                     doc.ir_attachment_id.sudo().write(att_vals)
+
+        # Some installations override create/write and re-privatize documents.
+        # As a last resort, enforce via SQL (only if the columns exist).
+        doc_model = self.env["product.document"].sudo()
+        doc_table = getattr(doc_model, "_table", None)
+        doc_ids = tuple(url_docs.ids)
+        att_ids = tuple([d.ir_attachment_id.id for d in url_docs if d.ir_attachment_id])
+        cr = self.env.cr
+
+        def _column_exists(table, column):
+            cr.execute(
+                "SELECT 1 FROM information_schema.columns WHERE table_name=%s AND column_name=%s LIMIT 1",
+                (table, column),
+            )
+            return bool(cr.fetchone())
+
+        if doc_table and doc_ids and _column_exists(doc_table, "shown_on_product_page"):
+            cr.execute(
+                f'UPDATE "{doc_table}" SET shown_on_product_page=TRUE WHERE id IN %s',
+                (doc_ids,),
+            )
+        if doc_table and doc_ids and _column_exists(doc_table, "public"):
+            cr.execute(
+                f'UPDATE "{doc_table}" SET public=TRUE WHERE id IN %s',
+                (doc_ids,),
+            )
+        if doc_table and doc_ids and _column_exists(doc_table, "website_id"):
+            cr.execute(
+                f'UPDATE "{doc_table}" SET website_id=NULL WHERE id IN %s',
+                (doc_ids,),
+            )
+
+        if att_ids:
+            # ir_attachment always exists
+            cr.execute('UPDATE "ir_attachment" SET public=TRUE, website_id=NULL WHERE id IN %s', (att_ids,))
 
     def _sync_template_media_and_resources(self, template, detail):
         """Sync images and resource links from SYSCOM detail into product.template."""
@@ -836,6 +876,8 @@ class SyscomProduct(models.Model):
                     "special_price_mxn": price_special_mxn,
                     "discount_price_mxn": price_discounts_mxn,
                 }, params)
+                # Enforce documents visibility on the website (URLs from SYSCOM resources)
+                self._ensure_template_documents_published(tmpl)
                 updated += 1
             except Exception:
                 tmpl.write({"syscom_api_ok": False, "syscom_stock_synced_at": now})
