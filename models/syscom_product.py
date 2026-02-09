@@ -784,10 +784,10 @@ class SyscomProduct(models.Model):
                     "discount_price_mxn": price_discounts_mxn,
                 }, params)
 
-                # Publicar en eCommerce automáticamente (si aplica)
-                self._ensure_template_published_on_website(template)
-                # Imágenes y recursos
+                # Imágenes/recursos primero, luego publicar.
+                # (Requerimiento: asegurar que los documentos queden listos antes de que el producto sea visible.)
                 self._sync_template_media_and_resources(template, detail)
+                self._ensure_template_published_on_website(template)
 
             except Exception as exc:
                 failed += 1
