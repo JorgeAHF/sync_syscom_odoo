@@ -1,9 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
     <template id="website_sale_product_syscom_stock" inherit_id="website_sale.product" name="SYSCOM Stock on PDP">
-        <!-- Show SYSCOM stock on product page (PDP).
-             Use a stable anchor across website_sale versions. -->
-        <xpath expr="//div[@id='wrap']" position="inside">
+        <!--
+          Show SYSCOM stock on product page (PDP).
+          website_sale.product markup changes between minor versions / website themes,
+          so we anchor on the first element in the template to avoid hard failures
+          during module upgrade.
+        -->
+        <xpath expr="//*[1]" position="inside">
             <t t-if="getattr(product, 'syscom_is_product', False) and getattr(product, 'syscom_product_id', False)">
                 <div class="mt-2 mb-2">
                     <div class="text-muted">
