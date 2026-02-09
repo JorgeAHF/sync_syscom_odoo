@@ -257,6 +257,41 @@ class SyscomProduct(models.Model):
         if vals:
             template.sudo().write(vals)
 
+    def _ensure_template_documents_published(self, template):
+        """Force product documents (URLs) to be published on the website.
+
+        In some setups, product.document defaults to private/hidden even when created by code.
+        We enforce both product.document flags and the delegated ir.attachment flags.
+        """
+        if not template:
+            return
+        if "product_document_ids" not in template._fields:
+            return
+        docs = template.sudo().product_document_ids
+        if not docs:
+            return
+        for doc in docs.sudo():
+            if getattr(doc, "type", None) != "url":
+                continue
+            vals = {}
+            if "shown_on_product_page" in doc._fields and not doc.shown_on_product_page:
+                vals["shown_on_product_page"] = True
+            if "public" in doc._fields and not doc.public:
+                vals["public"] = True
+            # Make it available for all websites (as requested) if the field exists.
+            if "website_id" in doc._fields and doc.website_id:
+                vals["website_id"] = False
+            if vals:
+                doc.write(vals)
+            if doc.ir_attachment_id:
+                att_vals = {}
+                if hasattr(doc.ir_attachment_id, "public") and not doc.ir_attachment_id.public:
+                    att_vals["public"] = True
+                if hasattr(doc.ir_attachment_id, "website_id") and getattr(doc.ir_attachment_id, "website_id", False):
+                    att_vals["website_id"] = False
+                if att_vals:
+                    doc.ir_attachment_id.sudo().write(att_vals)
+
     def _sync_template_media_and_resources(self, template, detail):
         """Sync images and resource links from SYSCOM detail into product.template."""
         Image = self.env["product.image"].sudo()
@@ -325,14 +360,6 @@ class SyscomProduct(models.Model):
             if not url:
                 continue
             if ProductDocument:
-                # Pick a website to publish on (best effort). Some Odoo setups require website_id
-                # to be set for public documents to be effectively published.
-                website = None
-                try:
-                    website = self.env["website"].sudo().search([], limit=1)
-                except Exception:
-                    website = None
-
                 doc = ProductDocument.search([
                     ("res_model", "=", "product.template"),
                     ("res_id", "=", template.id),
@@ -347,8 +374,8 @@ class SyscomProduct(models.Model):
                         update_vals["shown_on_product_page"] = True
                     if not doc.public:
                         update_vals["public"] = True
-                    if "website_id" in doc._fields and not doc.website_id and website:
-                        update_vals["website_id"] = website.id
+                    if "website_id" in doc._fields and doc.website_id:
+                        update_vals["website_id"] = False
                     if update_vals:
                         doc.write(update_vals)
                     # product.document.public may be linked to the delegated ir.attachment.public; enforce both..
@@ -356,8 +383,8 @@ class SyscomProduct(models.Model):
                         att_vals = {}
                         if hasattr(doc.ir_attachment_id, "public") and not doc.ir_attachment_id.public:
                             att_vals["public"] = True
-                        if hasattr(doc.ir_attachment_id, "website_id") and not doc.ir_attachment_id.website_id and website:
-                            att_vals["website_id"] = website.id
+                        if hasattr(doc.ir_attachment_id, "website_id") and getattr(doc.ir_attachment_id, "website_id", False):
+                            att_vals["website_id"] = False
                         if att_vals:
                             doc.ir_attachment_id.sudo().write(att_vals)
                 else:
@@ -371,8 +398,7 @@ class SyscomProduct(models.Model):
                         "public": True,
                         "description": "SYSCOM",
                     }
-                    if "website_id" in ProductDocument._fields and website:
-                        vals_doc["website_id"] = website.id
+                    # website_id left empty/False => visible on all websites
                     doc = ProductDocument.create(vals_doc)
                     # Some setups override create() and keep documents private by default.
                     # Force the publication flags after create to match the business requirement.
@@ -381,8 +407,8 @@ class SyscomProduct(models.Model):
                         force_vals["shown_on_product_page"] = True
                     if not doc.public:
                         force_vals["public"] = True
-                    if "website_id" in doc._fields and not doc.website_id and website:
-                        force_vals["website_id"] = website.id
+                    if "website_id" in doc._fields and doc.website_id:
+                        force_vals["website_id"] = False
                     if force_vals:
                         doc.write(force_vals)
                     # Enforce delegated attachment flags too (this is what actually drives public access).
@@ -390,8 +416,8 @@ class SyscomProduct(models.Model):
                         att_vals = {}
                         if hasattr(doc.ir_attachment_id, "public") and not doc.ir_attachment_id.public:
                             att_vals["public"] = True
-                        if hasattr(doc.ir_attachment_id, "website_id") and not doc.ir_attachment_id.website_id and website:
-                            att_vals["website_id"] = website.id
+                        if hasattr(doc.ir_attachment_id, "website_id") and getattr(doc.ir_attachment_id, "website_id", False):
+                            att_vals["website_id"] = False
                         if att_vals:
                             doc.ir_attachment_id.sudo().write(att_vals)
             else:
@@ -410,6 +436,9 @@ class SyscomProduct(models.Model):
                     "res_model": "product.template",
                     "res_id": template.id,
                 })
+
+        # Final enforcement (covers cases where create/write hooks re-private the document)
+        self._ensure_template_documents_published(template)
 
     name = fields.Char(string="Nombre", required=True)
     syscom_id = fields.Char(string="ID SYSCOM", required=True, index=True)
@@ -628,6 +657,8 @@ class SyscomProduct(models.Model):
         # Requerimiento: recursos/imagenes antes de publicar
         self._sync_template_media_and_resources(template, detail)
         self._ensure_template_published_on_website(template)
+        # Enforce doc publication after publish too (some hooks depend on is_published).
+        self._ensure_template_documents_published(template)
 
         return template, created
 
