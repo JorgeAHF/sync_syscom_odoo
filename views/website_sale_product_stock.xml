@@ -8,7 +8,7 @@
             <t t-if="tmpl.syscom_product_id">
                 <div class="container my-3">
                     <div class="alert alert-info py-2 mb-0">
-                        <strong>Stock SYSCOM (nuevo):</strong>
+                        <strong>Disponible para envío:</strong>
                         <span t-esc="tmpl.syscom_stock_new"/>
                         <t t-if="tmpl.syscom_stock_synced_at">
                             <span class="ms-2 small text-muted">
