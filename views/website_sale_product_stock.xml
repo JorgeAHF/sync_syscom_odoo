@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <template id="website_sale_product_syscom_stock" inherit_id="website_sale.product" name="SYSCOM Stock on PDP">
+        <!-- Show SYSCOM stock on product page (PDP) -->
+        <xpath expr="//div[contains(@class, 'o_wsale_product_information')]" position="inside">
+            <t t-if="getattr(product, 'syscom_is_product', False) and getattr(product, 'syscom_product_id', False)">
+                <div class="mt-2 mb-2">
+                    <div class="text-muted">
+                        <strong>Stock SYSCOM (nuevo):</strong>
+                        <span t-esc="getattr(product, 'syscom_stock_new', 0)"/>
+                    </div>
+                    <t t-if="getattr(product, 'syscom_stock_synced_at', False)">
+                        <div class="small text-muted">
+                            Actualizado:
+                            <span t-esc="product.syscom_stock_synced_at"/>
+                        </div>
+                    </t>
+                </div>
+            </t>
+        </xpath>
+    </template>
+</odoo>
+

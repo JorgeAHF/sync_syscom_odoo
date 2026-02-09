@@ -147,6 +147,57 @@ class SyscomProduct(models.Model):
 
         template.sudo().write({unspsc_field_name: unspsc.id})
 
+    def _sync_template_uom_from_sat(self, template, uom_sat_code):
+        """Set UoM on product.template from SAT unit code (clave_unidad_sat) if available in this DB."""
+        code = (uom_sat_code or "").strip()
+        if not code:
+            return
+        Uom = self.env["uom.uom"].sudo()
+        # In Mexican localization, the SAT code is commonly stored in this field.
+        field_name = None
+        for candidate in ("l10n_mx_edi_code", "l10n_mx_edi_unece_code", "l10n_mx_edi_uom_code"):
+            if candidate in Uom._fields:
+                field_name = candidate
+                break
+        if not field_name:
+            return
+        uom = Uom.search([(field_name, "=", code)], limit=1)
+        if not uom:
+            return
+        vals = {}
+        if "uom_id" in template._fields and template.uom_id != uom:
+            vals["uom_id"] = uom.id
+        if "uom_po_id" in template._fields and template.uom_po_id != uom:
+            vals["uom_po_id"] = uom.id
+        if vals:
+            template.sudo().write(vals)
+
+    def _ensure_syscom_vendor_on_template(self, template):
+        """Ensure SYSCOM vendor exists in supplierinfo for dropship procurement."""
+        vendor = self.env.ref("sync_syscom.res_partner_syscom_vendor", raise_if_not_found=False)
+        if not vendor or not template:
+            return
+        SupplierInfo = self.env["product.supplierinfo"].sudo()
+        partner_field = "partner_id" if "partner_id" in SupplierInfo._fields else "name"
+        existing = SupplierInfo.search([
+            ("product_tmpl_id", "=", template.id),
+            (partner_field, "=", vendor.id),
+        ], limit=1)
+        if existing:
+            return
+        vals = {
+            "product_tmpl_id": template.id,
+            partner_field: vendor.id,
+            "min_qty": 1.0,
+        }
+        if "delay" in SupplierInfo._fields:
+            vals["delay"] = 1
+        if "currency_id" in SupplierInfo._fields:
+            mxn = self.env.ref("base.MXN", raise_if_not_found=False)
+            if mxn:
+                vals["currency_id"] = mxn.id
+        SupplierInfo.create(vals)
+
     def _ensure_template_published_on_website(self, template):
         """Publish product on website (eCommerce) if the field exists.
 
@@ -350,6 +401,7 @@ class SyscomProduct(models.Model):
     exchange_rate_date = fields.Date(string="Fecha tipo de cambio")
     currency = fields.Char(string="Moneda origen", default="USD")
     total_existencia = fields.Integer(string="Existencia total")
+    stock_new = fields.Integer(string="Existencia nuevo")
     sat_key = fields.Char(string="Clave SAT")
     image_url = fields.Char(string="Imagen portada")
     brand_logo_url = fields.Char(string="Logo de marca")
@@ -431,31 +483,54 @@ class SyscomProduct(models.Model):
         })
 
     def cron_update_stock_selected(self):
-        """Cron diario 1am MX: actualiza existencias de productos seleccionados."""
-        client = self._get_client()
-        selected = self.search([("selected", "=", True)])
-        updated = failed = 0
+        """Cron background: refresca stock (nuevo), precios y costo de productos SYSCOM publicados.
+
+        El cron puede ejecutarse con frecuencia corta, pero se "salta" si aún no toca según settings.
+        """
         params = self.env["ir.config_parameter"].sudo()
-        location = self.env.ref("sync_syscom.stock_location_syscom", raise_if_not_found=False)
-        quant_model = self.env["stock.quant"]
+        enabled_raw = params.get_param("sync_syscom.stock_refresh_enabled")
+        if str(enabled_raw).strip().lower() in ("false", "0", "no", ""):
+            return
+
+        try:
+            hours = int(params.get_param("sync_syscom.stock_refresh_hours") or 4)
+        except Exception:
+            hours = 4
+        if hours < 1:
+            hours = 1
+
+        now = fields.Datetime.now()
+        last_run = params.get_param("sync_syscom.stock_refresh_last_run")
+        if last_run:
+            try:
+                last_dt = fields.Datetime.from_string(last_run)
+                if last_dt and (now - last_dt).total_seconds() < hours * 3600:
+                    return
+            except Exception:
+                pass
+
+        client = self._get_client()
+
+        # Tipo de cambio (una semana) por lote
         rate_payload = client.get_exchange_rate() or {}
         try:
             exchange_rate = float(rate_payload.get("una_semana") or rate_payload.get("normal") or 1.0)
         except Exception:
             exchange_rate = 1.0
         price_currency = params.get_param("sync_syscom.price_currency") or "usd"
+
+        # 1) Refresh staging "selected" (mantener info interna)
+        selected = self.search([("selected", "=", True)])
+        updated = failed = 0
         for prod in selected:
             try:
                 detail = client.get_product_detail(prod.syscom_id) or {}
-                total_existencia = detail.get("total_existencia") or 0
-                existence_json = detail.get("existencia") or {}
-                sat_key = detail.get("sat_key") or detail.get("sat") or ""
-                sat_description = detail.get("sat_description") or ""
+                existencia = detail.get("existencia") or {}
+                stock_new = int(existencia.get("nuevo") or 0)
+                total_existencia = int(detail.get("total_existencia") or 0)
                 precios = detail.get("precios") or {}
                 price_list = self._to_float(precios.get("precio_lista"))
                 price_special = self._to_float(precios.get("precio_especial"))
-                # SYSCOM returns "precio_descuento" (singular) in /productos/{id}.
-                # Keep backward compatibility with a potential plural key.
                 price_discounts = self._to_float(precios.get("precio_descuento") or precios.get("precio_descuentos"))
                 if price_currency == "usd":
                     price_list_mxn = price_list * exchange_rate
@@ -468,7 +543,7 @@ class SyscomProduct(models.Model):
 
                 prod.write({
                     "total_existencia": total_existencia,
-                    "sat_key": sat_key,
+                    "stock_new": stock_new,
                     "price_list": price_list,
                     "price_special": price_special,
                     "price_discounts": price_discounts,
@@ -477,50 +552,76 @@ class SyscomProduct(models.Model):
                     "price_discounts_mxn": price_discounts_mxn,
                     "exchange_rate": exchange_rate,
                     "exchange_rate_date": fields.Date.context_today(self),
-                    "existence_json": existence_json,
-                    "synced_at": fields.Datetime.now(),
+                    "existence_json": existencia,
+                    "synced_at": now,
                     "sync_error": False,
                 })
-                # Actualizar stock virtual SYSCOM si la ubicación existe
-                if location:
-                    product_template = self.env["product.template"].search(
-                        [("default_code", "=", prod.model or prod.syscom_id)],
-                        limit=1,
-                    )
-                    if product_template:
-                        product_variant = product_template.product_variant_id
-                        # Precios y costo también en cron
-                        self._update_template_pricelists_and_cost(product_template, {
-                            "list_price_mxn": price_list_mxn,
-                            "special_price_mxn": price_special_mxn,
-                            "discount_price_mxn": price_discounts_mxn,
-                        }, params)
-                        # UNSPSC from SAT key (if available)
-                        self._sync_template_unspsc_from_sat(product_template, sat_key, sat_description)
-                        quant = quant_model.sudo().search([
-                            ("product_id", "=", product_variant.id),
-                            ("location_id", "=", location.id),
-                        ], limit=1)
-                        if quant:
-                            quant.sudo().write({"quantity": total_existencia})
-                        else:
-                            quant_model.sudo().create({
-                                "product_id": product_variant.id,
-                                "location_id": location.id,
-                                "quantity": total_existencia,
-                            })
-                updated += 1
             except Exception as exc:
-                prod.write({
-                    "sync_error": str(exc),
-                    "synced_at": fields.Datetime.now(),
+                prod.write({"sync_error": str(exc), "synced_at": now})
+
+        # 2) Refresh product.template publicados (eCommerce)
+        Template = self.env["product.template"].sudo()
+        domain = [
+            ("syscom_is_product", "=", True),
+            ("syscom_product_id", "!=", False),
+            ("is_published", "=", True),
+        ]
+        templates = Template.search(domain)
+
+        for tmpl in templates:
+            if not tmpl._has_syscom_vendor():
+                continue
+            try:
+                detail = client.get_product_detail(tmpl.syscom_product_id) or {}
+                existencia = detail.get("existencia") or {}
+                stock_new = int(existencia.get("nuevo") or 0)
+
+                unidad = detail.get("unidad_de_medida") or {}
+                uom_sat = (unidad.get("clave_unidad_sat") or "").strip()
+                sat_key = detail.get("sat_key") or detail.get("sat") or ""
+                sat_description = detail.get("sat_description") or ""
+
+                precios = detail.get("precios") or {}
+                price_list = self._to_float(precios.get("precio_lista"))
+                price_special = self._to_float(precios.get("precio_especial"))
+                price_discounts = self._to_float(precios.get("precio_descuento") or precios.get("precio_descuentos"))
+                if price_currency == "usd":
+                    price_list_mxn = price_list * exchange_rate
+                    price_special_mxn = price_special * exchange_rate
+                    price_discounts_mxn = price_discounts * exchange_rate
+                else:
+                    price_list_mxn = price_list
+                    price_special_mxn = price_special
+                    price_discounts_mxn = price_discounts
+
+                tmpl.write({
+                    "syscom_stock_new": stock_new,
+                    "syscom_stock_synced_at": now,
+                    "syscom_api_ok": True,
+                    "syscom_uom_sat": uom_sat or False,
                 })
+                self._sync_template_unspsc_from_sat(tmpl, sat_key, sat_description)
+                self._sync_template_uom_from_sat(tmpl, uom_sat)
+                self._update_template_pricelists_and_cost(tmpl, {
+                    "list_price_mxn": price_list_mxn,
+                    "special_price_mxn": price_special_mxn,
+                    "discount_price_mxn": price_discounts_mxn,
+                }, params)
+                updated += 1
+            except Exception:
+                tmpl.write({"syscom_api_ok": False, "syscom_stock_synced_at": now})
                 failed += 1
 
-        self.env["sync.syscom.log"].create({
-            "name": "Actualización diaria de existencias SYSCOM",
+        params.set_param("sync_syscom.stock_refresh_last_run", fields.Datetime.to_string(now))
+
+        self.env["sync.syscom.log"].sudo().create({
+            "name": "Refresco stock/precios SYSCOM",
             "kind": "info",
-            "message": "Existencias actualizadas: %(u)s, fallidas: %(f)s" % {"u": updated, "f": failed},
+            "message": "Plantillas SYSCOM actualizadas: %(u)s, fallidas: %(f)s. Staging seleccionados: %(s)s" % {
+                "u": updated,
+                "f": failed,
+                "s": len(selected),
+            },
         })
 
     def action_publish_selected(self):
@@ -575,21 +676,24 @@ class SyscomProduct(models.Model):
                 default_code = detail.get("modelo") or product.model
                 description = detail.get("descripcion") or product.description or ""
                 link = detail.get("link") or product.link
-                total_existencia = detail.get("total_existencia") or 0
+                total_existencia = int(detail.get("total_existencia") or 0)
                 sat_key = detail.get("sat_key") or detail.get("sat") or ""
                 sat_description = detail.get("sat_description") or ""
                 image_url = detail.get("img_portada") or product.image_url or ""
                 brand_logo_url = detail.get("marca_logo") or ""
                 existence_json = detail.get("existencia") or {}
+                stock_new = int((existence_json or {}).get("nuevo") or 0)
+                unidad = detail.get("unidad_de_medida") or {}
+                uom_sat = (unidad.get("clave_unidad_sat") or "").strip()
                 icons_json = detail.get("iconos") or {}
                 features_json = detail.get("características") or detail.get("caracteristicas") or []
                 images_json = detail.get("imágenes") or detail.get("imagenes") or []
                 resources_json = detail.get("recursos") or []
 
                 # Validación de stock mínimo antes de dar de alta/publicar
-                if total_existencia < min_stock:
+                if stock_new < min_stock:
                     raise UserError(
-                        "Stock insuficiente en SYSCOM (%s). Mínimo requerido: %s." % (total_existencia, min_stock)
+                        "Stock insuficiente en SYSCOM (nuevo=%s). Mínimo requerido: %s." % (stock_new, min_stock)
                     )
 
                 product_vals = {
@@ -604,6 +708,7 @@ class SyscomProduct(models.Model):
                     "exchange_rate": exchange_rate,
                     "exchange_rate_date": exchange_rate_date,
                     "total_existencia": total_existencia,
+                    "stock_new": stock_new,
                     "sat_key": sat_key,
                     "image_url": image_url,
                     "brand_logo_url": brand_logo_url,
@@ -643,6 +748,12 @@ class SyscomProduct(models.Model):
                     "default_code": default_code,
                     "list_price": price_list_mxn,
                     "website_description": description,
+                    "syscom_is_product": True,
+                    "syscom_product_id": product.syscom_id,
+                    "syscom_stock_new": stock_new,
+                    "syscom_stock_synced_at": fields.Datetime.now(),
+                    "syscom_api_ok": True,
+                    "syscom_uom_sat": uom_sat or False,
                 }
                 if template:
                     template.write(template_vals)
@@ -650,6 +761,9 @@ class SyscomProduct(models.Model):
                 else:
                     template = self.env["product.template"].create(template_vals)
                     created += 1
+
+                # Ensure vendor is set for dropship procurement
+                self._ensure_syscom_vendor_on_template(template)
 
                 # Categoría Odoo (más profunda)
                 deepest_cat = self._get_deepest_category(cat_ids)
@@ -660,6 +774,8 @@ class SyscomProduct(models.Model):
 
                 # UNSPSC Category (for CFDI) from SYSCOM sat_key; do nothing if field isn't present.
                 self._sync_template_unspsc_from_sat(template, sat_key, sat_description)
+                # Unidad SAT -> UoM (si existe la localización)
+                self._sync_template_uom_from_sat(template, uom_sat)
 
                 # Actualizar listas de precios SYSCOM + costo
                 self._update_template_pricelists_and_cost(template, {
@@ -702,12 +818,4 @@ class SyscomProduct(models.Model):
                 "sticky": False,
             },
         }
-
-
-class ProductTemplate(models.Model):
-    _inherit = "product.template"
-
-    syscom_cost_margin_pct = fields.Float(
-        string="Margen costo SYSCOM (%)",
-        help="Porcentaje de descuento aplicado sobre precio especial SYSCOM para calcular el costo.",
-    )
+ 

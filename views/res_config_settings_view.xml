@@ -74,6 +74,20 @@
                                                 <span class="text-muted ms-2">% sobre precio especial para calcular costo.</span>
                                             </div>
                                         </div>
+                                        <div class="row mt8">
+                                            <label class="col-lg-4 o_light_label" for="syscom_stock_refresh_enabled"/>
+                                            <div class="col-lg-8">
+                                                <field name="syscom_stock_refresh_enabled" class="oe_inline"/>
+                                                <span class="text-muted ms-2">Refresca stock/precios/costo en background.</span>
+                                            </div>
+                                        </div>
+                                        <div class="row mt8">
+                                            <label class="col-lg-4 o_light_label" for="syscom_stock_refresh_hours"/>
+                                            <div class="col-lg-8">
+                                                <field name="syscom_stock_refresh_hours" class="oe_inline"/>
+                                                <span class="text-muted ms-2">Cada cuántas horas (mínimo) se actualiza el stock.</span>
+                                            </div>
+                                        </div>
                                         <div class="row mt16">
                                             <div class="col-lg-8 offset-lg-4">
                                                 <button type="object" name="action_syscom_test_connection" string="Probar conexión" class="btn btn-primary"/>

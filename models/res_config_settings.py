@@ -63,6 +63,19 @@ class ResConfigSettings(models.TransientModel):
         help="Porcentaje de descuento aplicado al precio especial para calcular el costo (standard_price).",
     )
 
+    syscom_stock_refresh_enabled = fields.Boolean(
+        string="Activar refresco de stock/precios SYSCOM",
+        default=True,
+        config_parameter="sync_syscom.stock_refresh_enabled",
+        help="Si está activo, se refresca stock (nuevo), precios y costo de productos SYSCOM publicados con una frecuencia configurable.",
+    )
+    syscom_stock_refresh_hours = fields.Integer(
+        string="Frecuencia de refresco (horas)",
+        default=4,
+        config_parameter="sync_syscom.stock_refresh_hours",
+        help="Intervalo mínimo entre refrescos. El cron corre en background y se salta ejecuciones si aún no toca.",
+    )
+
     def action_syscom_test_connection(self):
         self.ensure_one()
         params = self.env["ir.config_parameter"].sudo()

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <template id="website_sale_cart_syscom_error" inherit_id="website_sale.cart" name="SYSCOM Cart Error">
+        <xpath expr="//div[@id='cart_products']" position="before">
+            <t t-set="syscom_error" t-value="request.session.get('syscom_error')"/>
+            <t t-if="syscom_error">
+                <div class="alert alert-danger" role="alert">
+                    <t t-esc="syscom_error"/>
+                </div>
+                <t t-set="unused" t-value="request.session.pop('syscom_error')"/>
+            </t>
+        </xpath>
+    </template>
+</odoo>
+
