@@ -72,8 +72,13 @@ records.write({"selected": True})
                             <field name="name"/>
                             <field name="syscom_id"/>
                             <field name="level"/>
+                            <field name="syscom_sequence"/>
                             <field name="parent_id"/>
                             <field name="active"/>
+                        </group>
+                        <group string="Vínculos Odoo">
+                            <field name="product_category_id" readonly="1"/>
+                            <field name="public_category_id" readonly="1"/>
                         </group>
                         <group string="Marcas">
                             <field name="brand_ids" string="Marcas directas" widget="many2many_tags" context="{'sync_syscom_show_id': True}"/>

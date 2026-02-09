@@ -31,6 +31,17 @@ class SyscomCategory(models.Model):
         ondelete="set null",
         help="Categoría equivalente en Odoo para asignar a productos publicados.",
     )
+    public_category_id = fields.Many2one(
+        "product.public.category",
+        string="Categoría eCommerce",
+        ondelete="set null",
+        help="Categoría equivalente en eCommerce (product.public.category).",
+    )
+    syscom_sequence = fields.Integer(
+        string="Orden SYSCOM",
+        default=10,
+        help="Orden relativo dentro de sus hermanas (para replicar el orden en eCommerce).",
+    )
     brand_ids = fields.Many2many(
         "sync.syscom.brand",
         "sync_syscom_brand_category_rel",
@@ -123,19 +134,25 @@ class SyscomCategory(models.Model):
             except Exception:
                 return fallback
 
-        def add_category(payload, parent_syscom_id=None, level_hint=None):
+        def add_category(payload, parent_syscom_id=None, level_hint=None, sequence=None):
             if not isinstance(payload, dict):
                 return None
             syscom_id = str(payload.get("id") or "").strip()
             if not syscom_id:
                 return None
             level_val = parse_level(payload.get("nivel"), level_hint)
-            data_map[syscom_id] = {
+            vals = {
                 "syscom_id": syscom_id,
                 "name": payload.get("nombre") or syscom_id,
                 "level": level_val,
                 "active": True,
             }
+            if sequence is not None:
+                try:
+                    vals["syscom_sequence"] = int(sequence)
+                except Exception:
+                    pass
+            data_map[syscom_id] = vals
             if parent_syscom_id:
                 parent_map[syscom_id] = str(parent_syscom_id)
             return syscom_id, level_val
@@ -144,8 +161,8 @@ class SyscomCategory(models.Model):
         category_chunk_limit = int(params.get_param("sync_syscom.category_chunk_limit") or 5)
         offset = int(params.get_param("sync_syscom.category_sync_offset") or 0)
         categories_slice = categories[offset : offset + category_chunk_limit]
-        for category in categories_slice:
-            item = add_category(category, level_hint=1)
+        for i, category in enumerate(categories_slice):
+            item = add_category(category, level_hint=1, sequence=i * 10)
             if item:
                 queue.append(item)
 
@@ -183,8 +200,14 @@ class SyscomCategory(models.Model):
                     queue.append((item[0], item[1] or (current_level or 1)))
 
             subcats = detail.get("subcategorías") or detail.get("subcategorias") or []
-            for subcat in iter_entries(subcats):
-                item = add_category(subcat, parent_syscom_id=detail.get("id"), level_hint=(current_level or 1) + 1)
+            subcats_list = list(iter_entries(subcats))
+            for i, subcat in enumerate(subcats_list):
+                item = add_category(
+                    subcat,
+                    parent_syscom_id=detail.get("id"),
+                    level_hint=(current_level or 1) + 1,
+                    sequence=i * 10,
+                )
                 if item and (item[1] or 0) < 3:
                     queue.append((item[0], item[1] or ((current_level or 1) + 1)))
 
@@ -204,6 +227,10 @@ class SyscomCategory(models.Model):
             parent = self.search([("syscom_id", "=", parent_syscom_id)], limit=1)
             if child and parent:
                 child.parent_id = parent.id
+
+        # Replicar árbol de categorías también en eCommerce (product.public.category)
+        # Visible para todos los websites: website_id = False
+        self._sync_public_categories_from_syscom()
 
         duration = time.monotonic() - start_time
         offset += len(categories_slice)
@@ -235,6 +262,55 @@ class SyscomCategory(models.Model):
                 "sticky": False,
             },
         }
+
+    def _ensure_public_category(self, syscom_category):
+        """Create/link a product.public.category matching the SYSCOM category tree (website_id=False)."""
+        if not syscom_category:
+            return None
+        syscom_category = syscom_category.sudo()
+
+        def _seq():
+            try:
+                return int(syscom_category.syscom_sequence or 10)
+            except Exception:
+                return 10
+
+        if syscom_category.public_category_id:
+            if "sequence" in syscom_category.public_category_id._fields:
+                syscom_category.public_category_id.sudo().write({"sequence": _seq()})
+            return syscom_category.public_category_id
+
+        parent_public = None
+        if syscom_category.parent_id:
+            parent_public = self._ensure_public_category(syscom_category.parent_id)
+
+        PublicCategory = self.env["product.public.category"].sudo()
+        domain = [("name", "=", syscom_category.name)]
+        if "website_id" in PublicCategory._fields:
+            domain.append(("website_id", "=", False))
+        domain.append(("parent_id", "=", parent_public.id if parent_public else False))
+        public_cat = PublicCategory.search(domain, limit=1)
+        if not public_cat:
+            vals = {"name": syscom_category.name}
+            if parent_public:
+                vals["parent_id"] = parent_public.id
+            if "website_id" in PublicCategory._fields:
+                vals["website_id"] = False
+            if "sequence" in PublicCategory._fields:
+                vals["sequence"] = _seq()
+            public_cat = PublicCategory.create(vals)
+        else:
+            if "sequence" in public_cat._fields:
+                public_cat.write({"sequence": _seq()})
+
+        syscom_category.write({"public_category_id": public_cat.id})
+        return public_cat
+
+    def _sync_public_categories_from_syscom(self):
+        """Ensure all SYSCOM categories have a corresponding public category with correct sequence."""
+        all_cats = self.sudo().search([], order="level asc, syscom_sequence asc, name asc")
+        for cat in all_cats:
+            self._ensure_public_category(cat)
 
     def action_sync_brands_from_selected(self):
         params = self.env["ir.config_parameter"].sudo()

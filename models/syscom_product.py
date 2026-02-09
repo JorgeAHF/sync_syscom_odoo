@@ -49,6 +49,39 @@ class SyscomProduct(models.Model):
         syscom_category.write({"product_category_id": product_category.id})
         return product_category
 
+    def _ensure_public_category(self, syscom_category):
+        """Create/link product.public.category tree to mirror SYSCOM categories (website_id=False)."""
+        if not syscom_category:
+            return None
+        syscom_category = syscom_category.sudo()
+        if getattr(syscom_category, "public_category_id", False):
+            return syscom_category.public_category_id
+
+        parent_public = None
+        if syscom_category.parent_id:
+            parent_public = self._ensure_public_category(syscom_category.parent_id)
+
+        PublicCategory = self.env["product.public.category"].sudo()
+        domain = [("name", "=", syscom_category.name)]
+        if "website_id" in PublicCategory._fields:
+            domain.append(("website_id", "=", False))
+        domain.append(("parent_id", "=", parent_public.id if parent_public else False))
+        public_cat = PublicCategory.search(domain, limit=1)
+        if not public_cat:
+            vals = {"name": syscom_category.name}
+            if parent_public:
+                vals["parent_id"] = parent_public.id
+            if "website_id" in PublicCategory._fields:
+                vals["website_id"] = False
+            if "sequence" in PublicCategory._fields:
+                try:
+                    vals["sequence"] = int(getattr(syscom_category, "syscom_sequence", 10) or 10)
+                except Exception:
+                    vals["sequence"] = 10
+            public_cat = PublicCategory.create(vals)
+        syscom_category.write({"public_category_id": public_cat.id})
+        return public_cat
+
     def _update_template_pricelists_and_cost(self, template, prices_mxn, params):
         """Update pricelists (list, special, discount) and standard_price."""
 
@@ -771,6 +804,13 @@ class SyscomProduct(models.Model):
                     product_category = self._ensure_product_category(deepest_cat)
                     if product_category:
                         template.categ_id = product_category.id
+                    # Categoría eCommerce (replica el árbol y el orden de SYSCOM)
+                    try:
+                        public_cat = self._ensure_public_category(deepest_cat)
+                        if public_cat and "public_categ_ids" in template._fields:
+                            template.public_categ_ids = [(6, 0, [public_cat.id])]
+                    except Exception:
+                        pass
 
                 # UNSPSC Category (for CFDI) from SYSCOM sat_key; do nothing if field isn't present.
                 self._sync_template_unspsc_from_sat(template, sat_key, sat_description)
