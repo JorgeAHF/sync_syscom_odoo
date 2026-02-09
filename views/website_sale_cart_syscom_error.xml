@@ -7,9 +7,7 @@
                 <div class="alert alert-danger" role="alert">
                     <t t-esc="syscom_error"/>
                 </div>
-                <t t-set="unused" t-value="request.session.pop('syscom_error')"/>
             </t>
         </xpath>
     </template>
 </odoo>
-

@@ -21,5 +21,6 @@ class WebsiteSaleSyscom(WebsiteSale):
             # Show a friendly message on cart page and block continuing to checkout.
             request.session["syscom_error"] = str(exc)
             return request.redirect("/shop/cart")
+        # Clear any previous error once validation passes.
+        request.session.pop("syscom_error", None)
         return res
-
