@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
     <template id="website_sale_product_syscom_stock" inherit_id="website_sale.product" name="SYSCOM Stock on PDP">
-        <!-- Show SYSCOM stock on product page (PDP) -->
-        <xpath expr="//div[contains(@class, 'o_wsale_product_information')]" position="inside">
+        <!-- Show SYSCOM stock on product page (PDP).
+             Use a stable anchor (add_to_cart form) across website_sale versions. -->
+        <xpath expr="//form[@id='add_to_cart']" position="inside">
             <t t-if="getattr(product, 'syscom_is_product', False) and getattr(product, 'syscom_product_id', False)">
                 <div class="mt-2 mb-2">
                     <div class="text-muted">
@@ -20,4 +21,3 @@
         </xpath>
     </template>
 </odoo>
-
