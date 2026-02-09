@@ -9,7 +9,7 @@
             <field name="binding_type">action</field>
             <field name="state">code</field>
             <field name="code">
-                action = env["sync.syscom.product"].action_publish_selected()
+                action = env["sync.syscom.product"].action_start_publish_selected_background()
             </field>
         </record>
 
@@ -37,6 +37,7 @@
                     <field name="price_special"/>
                     <field name="price_special_mxn"/>
                     <field name="synced_at"/>
+                    <field name="publish_state"/>
                     <field name="sync_error"/>
                     <field name="active"/>
                 </list>
@@ -86,6 +87,9 @@
                         <group string="Metadatos">
                             <field name="synced_at"/>
                             <field name="sync_error"/>
+                            <field name="publish_state"/>
+                            <field name="publish_started_at"/>
+                            <field name="publish_done_at"/>
                         </group>
                         <notebook>
                             <page string="Existencias">

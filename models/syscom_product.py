@@ -448,6 +448,20 @@ class SyscomProduct(models.Model):
     payload = fields.Json(string="Payload SYSCOM")
     synced_at = fields.Datetime(string="Sincronizado en")
     sync_error = fields.Text(string="Último error de sync")
+    publish_state = fields.Selection(
+        [
+            ("none", "Ninguno"),
+            ("pending", "Pendiente"),
+            ("processing", "Procesando"),
+            ("done", "Publicado"),
+            ("error", "Error"),
+        ],
+        string="Estado publicación",
+        default="none",
+        index=True,
+    )
+    publish_started_at = fields.Datetime(string="Inicio publicación")
+    publish_done_at = fields.Datetime(string="Fin publicación")
 
     _syscom_id_unique = models.Constraint(
         "unique(syscom_id)",
@@ -465,6 +479,157 @@ class SyscomProduct(models.Model):
         timeout = int(params.get_param("sync_syscom.syscom_timeout") or 30)
         from .syscom_client import SyscomClient
         return SyscomClient(base_url=base_url, token=token, timeout=timeout)
+
+    def _compute_exchange_rate_batch(self, client):
+        """Return (exchange_rate, exchange_rate_date) for a batch."""
+        rate_payload = client.get_exchange_rate() or {}
+        try:
+            exchange_rate = float(rate_payload.get("una_semana") or rate_payload.get("normal") or 1.0)
+        except Exception:
+            exchange_rate = 1.0
+        exchange_rate_date = fields.Date.context_today(self)
+        return exchange_rate, exchange_rate_date
+
+    def _publish_one_from_detail(self, product, detail, params, exchange_rate, exchange_rate_date, price_currency):
+        """Publish one staging record into product.template using an already fetched SYSCOM detail payload.
+
+        Returns (template, created_bool).
+        """
+        precios = detail.get("precios") or {}
+        price_list = self._to_float(precios.get("precio_lista"))
+        price_special = self._to_float(precios.get("precio_especial"))
+        # SYSCOM returns "precio_descuento" (singular) in /productos/{id}.
+        price_discounts = self._to_float(precios.get("precio_descuento") or precios.get("precio_descuentos"))
+
+        if price_currency == "usd":
+            price_list_mxn = price_list * exchange_rate
+            price_special_mxn = price_special * exchange_rate
+            price_discounts_mxn = price_discounts * exchange_rate
+        else:
+            price_list_mxn = price_list
+            price_special_mxn = price_special
+            price_discounts_mxn = price_discounts
+
+        name = detail.get("titulo") or product.name
+        default_code = detail.get("modelo") or product.model
+        description = detail.get("descripcion") or product.description or ""
+        link = detail.get("link") or product.link
+        total_existencia = int(detail.get("total_existencia") or 0)
+        sat_key = detail.get("sat_key") or detail.get("sat") or ""
+        sat_description = detail.get("sat_description") or ""
+        image_url = detail.get("img_portada") or product.image_url or ""
+        brand_logo_url = detail.get("marca_logo") or ""
+        existence_json = detail.get("existencia") or {}
+        stock_new = int((existence_json or {}).get("nuevo") or 0)
+        unidad = detail.get("unidad_de_medida") or {}
+        uom_sat = (unidad.get("clave_unidad_sat") or "").strip()
+        icons_json = detail.get("iconos") or {}
+        features_json = detail.get("características") or detail.get("caracteristicas") or []
+        images_json = detail.get("imágenes") or detail.get("imagenes") or []
+        resources_json = detail.get("recursos") or []
+
+        min_stock = int(params.get_param("sync_syscom.min_stock") or 1)
+        if min_stock < 1:
+            min_stock = 1
+        if stock_new < min_stock:
+            raise UserError(
+                "Stock insuficiente en SYSCOM (nuevo=%s). Mínimo requerido: %s." % (stock_new, min_stock)
+            )
+
+        product_vals = {
+            "name": name,
+            "model": default_code,
+            "price_list": price_list,
+            "price_special": price_special,
+            "price_discounts": price_discounts,
+            "price_list_mxn": price_list_mxn,
+            "price_special_mxn": price_special_mxn,
+            "price_discounts_mxn": price_discounts_mxn,
+            "exchange_rate": exchange_rate,
+            "exchange_rate_date": exchange_rate_date,
+            "total_existencia": total_existencia,
+            "stock_new": stock_new,
+            "sat_key": sat_key,
+            "image_url": image_url,
+            "brand_logo_url": brand_logo_url,
+            "link": link,
+            "existence_json": existence_json,
+            "icons_json": icons_json,
+            "features_json": features_json,
+            "images_json": images_json,
+            "resources_json": resources_json,
+            "description": description,
+            "payload": detail,
+            "synced_at": fields.Datetime.now(),
+            "sync_error": False,
+        }
+
+        # Categorías del detalle
+        cat_ids = []
+        for cat in detail.get("categorías") or detail.get("categorias") or []:
+            cat_syscom_id = str(cat.get("id") or "").strip()
+            if not cat_syscom_id:
+                continue
+            cat_rec = self.env["sync.syscom.category"].search(
+                [("syscom_id", "=", cat_syscom_id)],
+                limit=1,
+            )
+            if cat_rec:
+                cat_ids.append(cat_rec.id)
+        if cat_ids:
+            product_vals["category_ids"] = [(6, 0, cat_ids)]
+
+        product.write(product_vals)
+
+        # Crear/actualizar plantilla de producto Odoo
+        template = self.env["product.template"].search([("default_code", "=", default_code)], limit=1)
+        created = False
+        template_vals = {
+            "name": name,
+            "default_code": default_code,
+            "list_price": price_list_mxn,
+            "website_description": description,
+            "syscom_is_product": True,
+            "syscom_product_id": product.syscom_id,
+            "syscom_stock_new": stock_new,
+            "syscom_stock_synced_at": fields.Datetime.now(),
+            "syscom_api_ok": True,
+            "syscom_uom_sat": uom_sat or False,
+        }
+        if template:
+            template.write(template_vals)
+        else:
+            template = self.env["product.template"].create(template_vals)
+            created = True
+
+        self._ensure_syscom_vendor_on_template(template)
+
+        deepest_cat = self._get_deepest_category(cat_ids)
+        if deepest_cat:
+            product_category = self._ensure_product_category(deepest_cat)
+            if product_category:
+                template.categ_id = product_category.id
+            try:
+                public_cat = self._ensure_public_category(deepest_cat)
+                if public_cat and "public_categ_ids" in template._fields:
+                    template.public_categ_ids = [(6, 0, [public_cat.id])]
+            except Exception:
+                pass
+
+        self._sync_template_unspsc_from_sat(template, sat_key, sat_description)
+        self._sync_template_uom_from_sat(template, uom_sat)
+
+        self._update_template_pricelists_and_cost(template, {
+            "list_price_mxn": price_list_mxn,
+            "special_price_mxn": price_special_mxn,
+            "discount_price_mxn": price_discounts_mxn,
+        }, params)
+
+        # Requerimiento: recursos/imagenes antes de publicar
+        self._sync_template_media_and_resources(template, detail)
+        self._ensure_template_published_on_website(template)
+
+        return template, created
 
     def cron_update_exchange_rate(self):
         """Cron semanal: recalcula precios MXN en staging y plantillas publicadas."""
@@ -858,4 +1023,88 @@ class SyscomProduct(models.Model):
                 "sticky": False,
             },
         }
+
+    def action_start_publish_selected_background(self):
+        """Programar publicación de seleccionados en background (cron por lotes)."""
+        products = self.search([("selected", "=", True)])
+        if not products:
+            raise UserError("No hay productos seleccionados para publicar.")
+
+        # Snapshot: marcamos como pendientes solo los seleccionados en este momento.
+        products.write({
+            "publish_state": "pending",
+            "publish_started_at": False,
+            "publish_done_at": False,
+            "sync_error": False,
+        })
+
+        self.env["sync.syscom.log"].sudo().create({
+            "name": "Publicación en background (inicio)",
+            "kind": "info",
+            "message": "Se programó la publicación de %s productos seleccionados." % len(products),
+        })
+
+        return {
+            "type": "ir.actions.client",
+            "tag": "display_notification",
+            "params": {
+                "title": "Sync SYSCOM",
+                "message": "Publicación iniciada en segundo plano (%s productos)." % len(products),
+                "type": "success",
+                "sticky": False,
+            },
+        }
+
+    def cron_publish_selected_products(self):
+        """Cron: publica productos pendientes en batches para evitar timeouts."""
+        params = self.env["ir.config_parameter"].sudo()
+        try:
+            batch_size = int(params.get_param("sync_syscom.publish_batch_size") or 10)
+        except Exception:
+            batch_size = 10
+        if batch_size < 1:
+            batch_size = 10
+
+        pending = self.search([("publish_state", "=", "pending")], order="id asc", limit=batch_size)
+        if not pending:
+            return
+
+        now = fields.Datetime.now()
+        pending.write({"publish_state": "processing", "publish_started_at": now})
+
+        client = self._get_client()
+        exchange_rate, exchange_rate_date = self._compute_exchange_rate_batch(client)
+        price_currency = params.get_param("sync_syscom.price_currency") or "usd"
+
+        ok = 0
+        err = 0
+        for prod in pending:
+            try:
+                detail = client.get_product_detail(prod.syscom_id) or {}
+                self._publish_one_from_detail(prod, detail, params, exchange_rate, exchange_rate_date, price_currency)
+                prod.write({
+                    "publish_state": "done",
+                    "publish_done_at": fields.Datetime.now(),
+                    "selected": False,
+                })
+                ok += 1
+            except Exception as exc:
+                err += 1
+                prod.write({
+                    "publish_state": "error",
+                    "publish_done_at": fields.Datetime.now(),
+                    "sync_error": str(exc),
+                })
+                self.env["sync.syscom.log"].sudo().create({
+                    "name": "Error publicación background",
+                    "kind": "error",
+                    "message": "%s (%s)" % (prod.name or prod.syscom_id, exc),
+                })
+                continue
+
+        self.env["sync.syscom.log"].sudo().create({
+            "name": "Publicación en background (batch)",
+            "kind": "info",
+            "message": "Batch publicado. OK: %(ok)s, errores: %(err)s." % {"ok": ok, "err": err},
+        })
  

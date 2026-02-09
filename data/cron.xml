@@ -48,5 +48,16 @@
             <field name="interval_type">minutes</field>
             <field name="active">True</field>
         </record>
+
+        <!-- Background publisher for selected products (runs frequently, no-op if nothing pending) -->
+        <record id="cron_sync_syscom_publish_selected" model="ir.cron">
+            <field name="name">Sync Syscom: publicar seleccionados (background)</field>
+            <field name="model_id" ref="model_sync_syscom_product"/>
+            <field name="state">code</field>
+            <field name="code">model.cron_publish_selected_products()</field>
+            <field name="interval_number">1</field>
+            <field name="interval_type">minutes</field>
+            <field name="active">True</field>
+        </record>
     </data>
 </odoo>
