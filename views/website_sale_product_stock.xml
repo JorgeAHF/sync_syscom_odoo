@@ -1,25 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
     <template id="website_sale_product_syscom_stock" inherit_id="website_sale.product" name="SYSCOM Stock on PDP">
-        <!--
-          Show SYSCOM stock on product page (PDP).
-          website_sale.product markup changes between minor versions / website themes,
-          so we anchor on the first element in the template to avoid hard failures
-          during module upgrade.
-        -->
-        <xpath expr="//*[1]" position="inside">
-            <t t-if="product.syscom_is_product and product.syscom_product_id">
-                <div class="mt-2 mb-2">
-                    <div class="text-muted">
+        <!-- Odoo 19 website_sale.product uses #product_detail / #wrap (no <main>). -->
+        <xpath expr="//section[@id='product_detail']" position="inside">
+            <!-- In this template, `product` is typically product.product (variant). Use template fields. -->
+            <t t-set="tmpl" t-value="product.product_tmpl_id if product._name == 'product.product' else product"/>
+            <t t-if="tmpl.syscom_product_id">
+                <div class="container my-3">
+                    <div class="alert alert-info py-2 mb-0">
                         <strong>Stock SYSCOM (nuevo):</strong>
-                        <span t-esc="product.syscom_stock_new"/>
+                        <span t-esc="tmpl.syscom_stock_new"/>
+                        <t t-if="tmpl.syscom_stock_synced_at">
+                            <span class="ms-2 small text-muted">
+                                (Actualizado: <t t-esc="tmpl.syscom_stock_synced_at"/>)
+                            </span>
+                        </t>
                     </div>
-                    <t t-if="product.syscom_stock_synced_at">
-                        <div class="small text-muted">
-                            Actualizado:
-                            <span t-esc="product.syscom_stock_synced_at"/>
-                        </div>
-                    </t>
                 </div>
             </t>
         </xpath>
