@@ -6,8 +6,8 @@
             <field name="name">Configuración SyncSyscom</field>
             <field name="res_model">res.config.settings</field>
             <field name="view_mode">form</field>
-            <!-- Use inline to match the Settings app behavior -->
-            <field name="target">inline</field>
+            <!-- Keep in the current window -->
+            <field name="target">current</field>
             <!-- Context key used by the standard Settings action; harmless if ignored -->
             <field name="context">{'module': 'sync_syscom'}</field>
         </record>
