@@ -1,6 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
     <data>
+        <!-- Settings action (used both inside the SyncSyscom app and inside General Settings sidebar) -->
+        <record id="action_sync_syscom_settings" model="ir.actions.act_window">
+            <field name="name">Configuración SyncSyscom</field>
+            <field name="res_model">res.config.settings</field>
+            <field name="view_mode">form</field>
+            <!-- Use inline to match the Settings app behavior -->
+            <field name="target">inline</field>
+            <!-- Context key used by the standard Settings action; harmless if ignored -->
+            <field name="context">{'module': 'sync_syscom'}</field>
+        </record>
+
         <record id="server_action_sync_cat_brand_models" model="ir.actions.server">
             <field name="name">Sincronizar categorías, marcas y modelos</field>
             <field name="model_id" ref="base.model_res_users"/>
@@ -86,6 +97,26 @@ action = env["sync.syscom.category"].action_start_sync_pipeline()
             name="Logs"
             parent="menu_sync_syscom_root"
             action="action_sync_syscom_log"
+            groups="sync_syscom.group_sync_syscom_manager"
+        />
+
+        <!-- Top bar menu entry inside the SyncSyscom app -->
+        <menuitem
+            id="menu_sync_syscom_settings"
+            name="Configuración"
+            parent="menu_sync_syscom_root"
+            action="action_sync_syscom_settings"
+            sequence="90"
+            groups="sync_syscom.group_sync_syscom_manager"
+        />
+
+        <!-- Left sidebar entry inside Odoo Settings (Ajustes) -->
+        <menuitem
+            id="menu_sync_syscom_settings_in_settings"
+            name="SyncSyscom"
+            parent="base.menu_config"
+            action="action_sync_syscom_settings"
+            sequence="90"
             groups="sync_syscom.group_sync_syscom_manager"
         />
     </data>
