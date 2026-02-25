@@ -493,15 +493,6 @@ class SyscomBrand(models.Model):
 
     def action_sync_models_selected(self):
         """Sincroniza modelos de marcas seleccionadas y categorías seleccionadas."""
-        params = self.env["ir.config_parameter"].sudo()
-        token = (params.get_param("sync_syscom.syscom_api_token") or "").strip()
-        if not token:
-            raise UserError(_("Configura el token en Ajustes antes de sincronizar."))
-
-        base_url = params.get_param("sync_syscom.syscom_base_url") or "https://developers.syscom.mx/api/v1"
-        timeout = int(params.get_param("sync_syscom.syscom_timeout") or 30)
-        client = SyscomClient(base_url=base_url, token=token, timeout=timeout)
-
         categories_selected = self._get_selected_categories()
         selected_cat_ids = set(categories_selected.mapped("syscom_id"))
         if not selected_cat_ids:
@@ -511,63 +502,10 @@ class SyscomBrand(models.Model):
         if not brands:
             raise UserError(_("Marca al menos una marca (columna Sel) antes de sincronizar modelos."))
 
-        created = updated = kept = 0
-        category_product_links = defaultdict(list)
-
-        for brand in brands:
-            products = self._fetch_all_brand_products(
-                client,
-                brand.syscom_id,
-                stock=params.get_param("sync_syscom.brand_products_stock"),
-            ) or []
-            for product in products:
-                prod_syscom_id = str(product.get("producto_id") or product.get("id") or "").strip()
-                if not prod_syscom_id:
-                    continue
-                categories = product.get("categorías") or product.get("categorias") or []
-                cat_ids = []
-                match_selected = False
-                for cat in categories:
-                    cat_syscom_id = str(cat.get("id") or "").strip()
-                    if not cat_syscom_id:
-                        continue
-                    cat_record = self.env["sync.syscom.category"].search(
-                        [("syscom_id", "=", cat_syscom_id)],
-                        limit=1,
-                    )
-                    if cat_record:
-                        cat_ids.append(cat_record.id)
-                        if cat_syscom_id in selected_cat_ids:
-                            match_selected = True
-                if not match_selected:
-                    continue
-
-                vals = {
-                    "syscom_id": prod_syscom_id,
-                    "model": product.get("modelo") or prod_syscom_id,
-                    "name": product.get("titulo") or product.get("modelo") or prod_syscom_id,
-                    "active": True,
-                    "brand_id": brand.id,
-                }
-                prod_record = self.env["sync.syscom.product"].search(
-                    [("syscom_id", "=", prod_syscom_id)],
-                    limit=1,
-                )
-                if prod_record:
-                    prod_record.write(vals)
-                    updated += 1
-                else:
-                    prod_record = self.env["sync.syscom.product"].create(vals)
-                    created += 1
-                if cat_ids:
-                    prod_record.category_ids = [(6, 0, cat_ids)]
-                    for cid in cat_ids:
-                        category_product_links[cid].append(prod_record.id)
-                kept += 1
-
-        for cat_id, prod_ids in category_product_links.items():
-            category = self.env["sync.syscom.category"].browse(cat_id)
-            category.product_ids = [(6, 0, list(set(prod_ids)))]
+        stats = self._sync_models_for_brands(brands, allowed_category_syscom_ids=selected_cat_ids)
+        created = stats["created"]
+        updated = stats["updated"]
+        kept = stats["kept"]
 
         self.env["sync.syscom.log"].create({
             "name": _("Sincronización de modelos (marcas/categorías seleccionadas)"),
@@ -583,6 +521,126 @@ class SyscomBrand(models.Model):
                 "title": _("Sync SYSCOM"),
                 "message": _("Modelos sincronizados: %(kept)s (creados: %(created)s, actualizados: %(updated)s).")
                 % {"created": created, "updated": updated, "kept": kept},
+                "type": "success",
+                "sticky": False,
+            },
+        }
+
+    def _sync_models_for_brands(self, brands, allowed_category_syscom_ids=None):
+        """Sync staging products for brands, optionally filtering by allowed SYSCOM categories."""
+        params = self.env["ir.config_parameter"].sudo()
+        token = (params.get_param("sync_syscom.syscom_api_token") or "").strip()
+        if not token:
+            raise UserError(_("Configura el token en Ajustes antes de sincronizar."))
+
+        base_url = params.get_param("sync_syscom.syscom_base_url") or "https://developers.syscom.mx/api/v1"
+        timeout = int(params.get_param("sync_syscom.syscom_timeout") or 30)
+        client = SyscomClient(base_url=base_url, token=token, timeout=timeout)
+
+        allowed_set = set(allowed_category_syscom_ids or [])
+        created = updated = kept = 0
+        category_product_links = defaultdict(list)
+        Product = self.env["sync.syscom.product"]
+        products_synced = Product.browse([])
+
+        for brand in brands:
+            products = self._fetch_all_brand_products(
+                client,
+                brand.syscom_id,
+                stock=params.get_param("sync_syscom.brand_products_stock"),
+            ) or []
+            for product in products:
+                prod_syscom_id = str(product.get("producto_id") or product.get("id") or "").strip()
+                if not prod_syscom_id:
+                    continue
+
+                categories = product.get("categorías") or product.get("categorias") or []
+                cat_ids = []
+                match_scope = not allowed_set
+                for cat in categories:
+                    cat_syscom_id = str(cat.get("id") or "").strip()
+                    if not cat_syscom_id:
+                        continue
+                    cat_record = self.env["sync.syscom.category"].search(
+                        [("syscom_id", "=", cat_syscom_id)],
+                        limit=1,
+                    )
+                    if cat_record:
+                        cat_ids.append(cat_record.id)
+                        if allowed_set and cat_syscom_id in allowed_set:
+                            match_scope = True
+                if not match_scope:
+                    continue
+
+                vals = {
+                    "syscom_id": prod_syscom_id,
+                    "model": product.get("modelo") or prod_syscom_id,
+                    "name": product.get("titulo") or product.get("modelo") or prod_syscom_id,
+                    "active": True,
+                    "brand_id": brand.id,
+                }
+                prod_record = Product.search([("syscom_id", "=", prod_syscom_id)], limit=1)
+                if prod_record:
+                    prod_record.write(vals)
+                    updated += 1
+                else:
+                    prod_record = Product.create(vals)
+                    created += 1
+
+                if cat_ids:
+                    prod_record.category_ids = [(6, 0, cat_ids)]
+                    for cid in cat_ids:
+                        category_product_links[cid].append(prod_record.id)
+
+                products_synced |= prod_record
+                kept += 1
+
+        for cat_id, prod_ids in category_product_links.items():
+            category = self.env["sync.syscom.category"].browse(cat_id)
+            category.product_ids = [(6, 0, list(set(prod_ids)))]
+
+        return {
+            "created": created,
+            "updated": updated,
+            "kept": kept,
+            "products": products_synced,
+        }
+
+    def action_publish_scope_brands(self):
+        """Sync models for selected brands and queue them for background publication."""
+        brands = self
+        if not brands:
+            brands = self.search([("selected", "=", True)])
+        if not brands:
+            raise UserError(_("Selecciona al menos una marca para publicar."))
+
+        stats = self._sync_models_for_brands(brands, allowed_category_syscom_ids=None)
+        queued = self.env["sync.syscom.product"].queue_products_for_background_publish(
+            stats["products"],
+            source_label="Marcas (%s)" % ", ".join(brands.mapped("syscom_id")),
+        )
+        if not queued:
+            raise UserError(_("No se encontraron productos para publicar en las marcas seleccionadas."))
+
+        self.env["sync.syscom.log"].sudo().create({
+            "name": _("Publicación por marcas (programada)"),
+            "kind": "info",
+            "message": _("Marcas: %(brands)s. Modelos sync: %(kept)s (creados %(created)s, actualizados %(updated)s). En cola: %(queued)s.")
+            % {
+                "brands": ", ".join(brands.mapped("syscom_id")),
+                "kept": stats["kept"],
+                "created": stats["created"],
+                "updated": stats["updated"],
+                "queued": queued,
+            },
+        })
+
+        return {
+            "type": "ir.actions.client",
+            "tag": "display_notification",
+            "params": {
+                "title": _("Sync SYSCOM"),
+                "message": _("Publicación por marca iniciada en segundo plano. En cola: %s.") % queued,
                 "type": "success",
                 "sticky": False,
             },

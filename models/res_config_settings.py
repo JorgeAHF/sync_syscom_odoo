@@ -75,6 +75,12 @@ class ResConfigSettings(models.TransientModel):
         config_parameter="sync_syscom.stock_refresh_hours",
         help="Intervalo mínimo entre refrescos. El cron corre en background y se salta ejecuciones si aún no toca.",
     )
+    syscom_publish_include_children = fields.Boolean(
+        string="Publicar categorías con subcategorías",
+        default=True,
+        config_parameter="sync_syscom.publish_include_subcategories",
+        help="Si está activo, las acciones de publicar por categoría incluyen automáticamente sus subcategorías.",
+    )
 
     def action_syscom_test_connection(self):
         self.ensure_one()

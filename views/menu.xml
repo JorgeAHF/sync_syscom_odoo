@@ -44,11 +44,19 @@ action = env["sync.syscom.category"].action_start_sync_pipeline()
             groups="sync_syscom.group_sync_syscom_manager"
         />
         <menuitem
+            id="menu_sync_syscom_publish_jobs"
+            name="Ver trabajos publicación"
+            parent="menu_sync_syscom_sync"
+            action="action_sync_syscom_publish_jobs"
+            groups="sync_syscom.group_sync_syscom_manager"
+        />
+        <menuitem
             id="menu_sync_syscom_sync_categories"
             name="Sync Categorías"
             parent="menu_sync_syscom_sync"
             action="server_action_sync_syscom_category"
             groups="sync_syscom.group_sync_syscom_manager"
+            active="False"
         />
         <menuitem
             id="menu_sync_syscom_sync_brands"
@@ -56,6 +64,7 @@ action = env["sync.syscom.category"].action_start_sync_pipeline()
             parent="menu_sync_syscom_sync"
             action="server_action_sync_syscom_brand"
             groups="sync_syscom.group_sync_syscom_manager"
+            active="False"
         />
         <menuitem
             id="menu_sync_syscom_sync_models_selected"
@@ -63,6 +72,7 @@ action = env["sync.syscom.category"].action_start_sync_pipeline()
             parent="menu_sync_syscom_sync"
             action="server_action_sync_syscom_models_selected"
             groups="sync_syscom.group_sync_syscom_manager"
+            active="False"
         />
         <menuitem
             id="menu_sync_syscom_publish_selected"
@@ -70,6 +80,7 @@ action = env["sync.syscom.category"].action_start_sync_pipeline()
             parent="menu_sync_syscom_sync"
             action="server_action_publish_syscom_products"
             groups="sync_syscom.group_sync_syscom_manager"
+            active="False"
         />
         <menuitem
             id="menu_sync_syscom_categories"

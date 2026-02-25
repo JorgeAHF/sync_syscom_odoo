@@ -117,5 +117,29 @@
             <field name="res_model">sync.syscom.product</field>
             <field name="view_mode">list,form</field>
         </record>
+
+        <record id="view_sync_syscom_product_search" model="ir.ui.view">
+            <field name="name">sync.syscom.product.search</field>
+            <field name="model">sync.syscom.product</field>
+            <field name="arch" type="xml">
+                <search string="Buscar modelos SYSCOM">
+                    <field name="name"/>
+                    <field name="model"/>
+                    <field name="brand_id"/>
+                    <field name="category_ids"/>
+                    <filter name="publish_pending" string="Pendientes" domain="[('publish_state', 'in', ['pending', 'processing'])]"/>
+                    <filter name="publish_error" string="Con error" domain="[('publish_state', '=', 'error')]"/>
+                    <filter name="publish_done" string="Publicados" domain="[('publish_state', '=', 'done')]"/>
+                </search>
+            </field>
+        </record>
+
+        <record id="action_sync_syscom_publish_jobs" model="ir.actions.act_window">
+            <field name="name">Trabajos de publicación</field>
+            <field name="res_model">sync.syscom.product</field>
+            <field name="view_mode">list,form</field>
+            <field name="domain">[('publish_state', '!=', 'none')]</field>
+            <field name="context">{'search_default_publish_pending': 1}</field>
+        </record>
     </data>
 </odoo>

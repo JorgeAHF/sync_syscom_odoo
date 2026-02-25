@@ -88,6 +88,13 @@
                                                 <span class="text-muted ms-2">Cada cuántas horas (mínimo) se actualiza el stock.</span>
                                             </div>
                                         </div>
+                                        <div class="row mt8">
+                                            <label class="col-lg-4 o_light_label" for="syscom_publish_include_children"/>
+                                            <div class="col-lg-8">
+                                                <field name="syscom_publish_include_children" class="oe_inline"/>
+                                                <span class="text-muted ms-2">En publicación por categoría, incluye automáticamente subcategorías.</span>
+                                            </div>
+                                        </div>
                                         <div class="row mt16">
                                             <div class="col-lg-8 offset-lg-4">
                                                 <button type="object" name="action_syscom_test_connection" string="Probar conexión" class="btn btn-primary"/>

@@ -23,6 +23,28 @@ records.write({"selected": True})
             </field>
         </record>
 
+        <record id="server_action_publish_categories_with_children" model="ir.actions.server">
+            <field name="name">Publicar eCommerce (con subcategorías)</field>
+            <field name="model_id" ref="model_sync_syscom_category"/>
+            <field name="binding_model_id" ref="model_sync_syscom_category"/>
+            <field name="binding_type">action</field>
+            <field name="state">code</field>
+            <field name="code">
+action = records.action_publish_scope_categories(include_children=True)
+            </field>
+        </record>
+
+        <record id="server_action_publish_categories_only" model="ir.actions.server">
+            <field name="name">Publicar eCommerce (solo categoría)</field>
+            <field name="model_id" ref="model_sync_syscom_category"/>
+            <field name="binding_model_id" ref="model_sync_syscom_category"/>
+            <field name="binding_type">action</field>
+            <field name="state">code</field>
+            <field name="code">
+action = records.action_publish_scope_categories(include_children=False)
+            </field>
+        </record>
+
         <record id="view_sync_syscom_category_tree" model="ir.ui.view">
             <field name="name">sync.syscom.category.list</field>
             <field name="model">sync.syscom.category</field>
@@ -50,6 +72,13 @@ records.write({"selected": True})
                             class="btn-secondary"
                             groups="sync_syscom.group_sync_syscom_manager"
                         />
+                        <button
+                            name="%(server_action_publish_categories_with_children)d"
+                            type="action"
+                            string="Publicar eCommerce"
+                            class="btn-primary"
+                            groups="sync_syscom.group_sync_syscom_manager"
+                        />
                     </header>
                     <field name="level1_name" string="Nivel 1" readonly="1"/>
                     <field name="level2_name" string="Nivel 2" readonly="1"/>
@@ -67,6 +96,22 @@ records.write({"selected": True})
             <field name="model">sync.syscom.category</field>
             <field name="arch" type="xml">
                 <form string="Categoría SYSCOM">
+                    <header>
+                        <button
+                            name="%(server_action_publish_categories_with_children)d"
+                            type="action"
+                            string="Publicar eCommerce"
+                            class="btn-primary"
+                            groups="sync_syscom.group_sync_syscom_manager"
+                        />
+                        <button
+                            name="%(server_action_publish_categories_only)d"
+                            type="action"
+                            string="Publicar solo categoría"
+                            class="btn-secondary"
+                            groups="sync_syscom.group_sync_syscom_manager"
+                        />
+                    </header>
                     <sheet>
                         <group>
                             <field name="name"/>

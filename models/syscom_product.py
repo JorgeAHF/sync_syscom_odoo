@@ -1097,13 +1097,12 @@ class SyscomProduct(models.Model):
             },
         }
 
-    def action_start_publish_selected_background(self):
-        """Programar publicación de seleccionados en background (cron por lotes)."""
-        products = self.search([("selected", "=", True)])
+    def queue_products_for_background_publish(self, products, source_label=None):
+        """Queue products for background publication."""
+        products = products.exists()
         if not products:
-            raise UserError("No hay productos seleccionados para publicar.")
+            return 0
 
-        # Snapshot: marcamos como pendientes solo los seleccionados en este momento.
         products.write({
             "publish_state": "pending",
             "publish_started_at": False,
@@ -1111,18 +1110,27 @@ class SyscomProduct(models.Model):
             "sync_error": False,
         })
 
+        source = source_label or "selección manual"
         self.env["sync.syscom.log"].sudo().create({
             "name": "Publicación en background (inicio)",
             "kind": "info",
-            "message": "Se programó la publicación de %s productos seleccionados." % len(products),
+            "message": "Se programó la publicación de %s productos. Origen: %s." % (len(products), source),
         })
+        return len(products)
+
+    def action_start_publish_selected_background(self):
+        """Programar publicación de seleccionados en background (cron por lotes)."""
+        products = self.search([("selected", "=", True)])
+        if not products:
+            raise UserError("No hay productos seleccionados para publicar.")
+        queued = self.queue_products_for_background_publish(products, source_label="Modelos seleccionados")
 
         return {
             "type": "ir.actions.client",
             "tag": "display_notification",
             "params": {
                 "title": "Sync SYSCOM",
-                "message": "Publicación iniciada en segundo plano (%s productos)." % len(products),
+                "message": "Publicación iniciada en segundo plano (%s productos)." % queued,
                 "type": "success",
                 "sticky": False,
             },

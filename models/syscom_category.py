@@ -323,27 +323,76 @@ class SyscomCategory(models.Model):
             raise UserError(_("Marca al menos una categoría (columna Sel) antes de sincronizar marcas."))
 
         selected_syscom_ids = set(selected_categories.mapped("syscom_id"))
+        chunk_limit = int(params.get_param("sync_syscom.brand_chunk_limit") or 50)
+        stats = self._sync_brands_for_scope(selected_syscom_ids, chunk_limit=chunk_limit)
+
+        self.env["sync.syscom.log"].create({
+            "name": _("Sincronización de marcas (categorías seleccionadas)"),
+            "kind": "info",
+            "message": _("Marcas vinculadas: %(kept)s, omitidas por categoría: %(skipped)s, timeout: %(t)s, procesadas en este lote: %(p)s, restantes estimadas: %(r)s")
+            % {
+                "kept": stats["kept"],
+                "skipped": stats["skipped"],
+                "t": stats["skipped_timeout"],
+                "p": stats["processed"],
+                "r": stats["remaining"],
+            },
+        })
+
+        return {
+            "type": "ir.actions.client",
+            "tag": "display_notification",
+            "params": {
+                "title": _("Sync SYSCOM"),
+                "message": _("Marcas sincronizadas: %(kept)s (omitidas categoría: %(skipped)s, timeout: %(t)s). Lote procesado: %(p)s, restantes estimadas: %(r)s.")
+                % {
+                    "kept": stats["kept"],
+                    "skipped": stats["skipped"],
+                    "t": stats["skipped_timeout"],
+                    "p": stats["processed"],
+                    "r": stats["remaining"],
+                },
+                "type": "success",
+                "sticky": False,
+            },
+        }
+
+    def _sync_brands_for_scope(self, selected_syscom_ids, chunk_limit=None):
+        """Sync brand records linked to selected SYSCOM categories."""
+        params = self.env["ir.config_parameter"].sudo()
+        token = (params.get_param("sync_syscom.syscom_api_token") or "").strip()
+        if not token:
+            raise UserError(_("Configura el token en Ajustes antes de sincronizar."))
+        if not selected_syscom_ids:
+            return {
+                "kept": 0,
+                "skipped": 0,
+                "skipped_timeout": 0,
+                "processed": 0,
+                "remaining": 0,
+                "brands": self.env["sync.syscom.brand"].browse([]),
+            }
 
         base_url = params.get_param("sync_syscom.syscom_base_url") or "https://developers.syscom.mx/api/v1"
         timeout = int(params.get_param("sync_syscom.syscom_timeout") or 30)
-        chunk_limit = int(params.get_param("sync_syscom.brand_chunk_limit") or 50)
         client = SyscomClient(base_url=base_url, token=token, timeout=timeout)
 
-        brands = client.get_brands() or []
+        all_brands = client.get_brands() or []
         kept = 0
         skipped = 0
         skipped_timeout = 0
         processed = 0
         remaining = 0
+        brand_records = self.env["sync.syscom.brand"].browse([])
 
-        for brand in brands:
-            if processed >= chunk_limit:
+        for brand in all_brands:
+            if chunk_limit and processed >= chunk_limit:
                 remaining += 1
                 continue
             syscom_id = str(brand.get("id") or "").strip()
             if not syscom_id:
                 continue
-            # Intentar usar categorías del listado para evitar muchas llamadas de detalle
+
             categories = brand.get("categorías") or brand.get("categorias") or []
             detail = None
             if not categories:
@@ -357,12 +406,11 @@ class SyscomCategory(models.Model):
             cat_ids = []
             for category in categories:
                 cat_syscom_id = str(category.get("id") or "").strip()
-                if not cat_syscom_id:
+                if not cat_syscom_id or cat_syscom_id not in selected_syscom_ids:
                     continue
-                if cat_syscom_id in selected_syscom_ids:
-                    cat_record = self.search([("syscom_id", "=", cat_syscom_id)], limit=1)
-                    if cat_record:
-                        cat_ids.append(cat_record.id)
+                cat_record = self.search([("syscom_id", "=", cat_syscom_id)], limit=1)
+                if cat_record:
+                    cat_ids.append(cat_record.id)
             if not cat_ids:
                 skipped += 1
                 continue
@@ -389,14 +437,72 @@ class SyscomCategory(models.Model):
             else:
                 brand_record = self.env["sync.syscom.brand"].create(brand_vals)
             brand_record.category_ids = [(6, 0, cat_ids)]
+
+            brand_records |= brand_record
             kept += 1
             processed += 1
 
-        self.env["sync.syscom.log"].create({
-            "name": _("Sincronización de marcas (categorías seleccionadas)"),
+        return {
+            "kept": kept,
+            "skipped": skipped,
+            "skipped_timeout": skipped_timeout,
+            "processed": processed,
+            "remaining": remaining,
+            "brands": brand_records,
+        }
+
+    def _get_scope_categories(self, include_children=True):
+        """Return categories in scope from the current recordset."""
+        categories = self.exists()
+        if not categories:
+            return categories
+        if not include_children:
+            return categories
+        return self.search([("id", "child_of", categories.ids)])
+
+    def action_publish_scope_categories(self, include_children=None):
+        """Sync and queue publication for products inside selected categories."""
+        categories = self.exists()
+        if not categories:
+            categories = self.search([("selected", "=", True)])
+        if not categories:
+            raise UserError(_("Selecciona al menos una categoría para publicar."))
+
+        params = self.env["ir.config_parameter"].sudo()
+        if include_children is None:
+            include_children = params.get_param("sync_syscom.publish_include_subcategories", "1").lower() in ("1", "true", "yes")
+        scope_categories = categories._get_scope_categories(include_children=bool(include_children))
+        selected_syscom_ids = set(scope_categories.mapped("syscom_id"))
+        stats_brands = self._sync_brands_for_scope(selected_syscom_ids, chunk_limit=None)
+
+        brand_model = self.env["sync.syscom.brand"]
+        stats_models = brand_model._sync_models_for_brands(
+            stats_brands["brands"],
+            allowed_category_syscom_ids=selected_syscom_ids,
+        )
+        queued = self.env["sync.syscom.product"].queue_products_for_background_publish(
+            stats_models["products"],
+            source_label="Categorias (%s)" % ", ".join(scope_categories.mapped("syscom_id")),
+        )
+        if not queued:
+            raise UserError(_("No se encontraron productos para publicar en el alcance seleccionado."))
+
+        self.env["sync.syscom.log"].sudo().create({
+            "name": _("Publicación por categorías (programada)"),
             "kind": "info",
-            "message": _("Marcas vinculadas: %(kept)s, omitidas por categoría: %(skipped)s, timeout: %(t)s, procesadas en este lote: %(p)s, restantes estimadas: %(r)s")
-            % {"kept": kept, "skipped": skipped, "t": skipped_timeout, "p": processed, "r": remaining},
+            "message": _(
+                "Categorías base: %(base)s. Scope: %(scope)s (subcategorías=%(child)s). "
+                "Marcas vinculadas: %(brands)s. Modelos sync: %(models)s (creados %(created)s, actualizados %(updated)s). En cola: %(queued)s."
+            ) % {
+                "base": ", ".join(categories.mapped("syscom_id")),
+                "scope": len(scope_categories),
+                "child": "sí" if include_children else "no",
+                "brands": stats_brands["kept"],
+                "models": stats_models["kept"],
+                "created": stats_models["created"],
+                "updated": stats_models["updated"],
+                "queued": queued,
+            },
         })
 
         return {
@@ -404,8 +510,7 @@ class SyscomCategory(models.Model):
             "tag": "display_notification",
             "params": {
                 "title": _("Sync SYSCOM"),
-                "message": _("Marcas sincronizadas: %(kept)s (omitidas categoría: %(skipped)s, timeout: %(t)s). Lote procesado: %(p)s, restantes estimadas: %(r)s.")
-                % {"kept": kept, "skipped": skipped, "t": skipped_timeout, "p": processed, "r": remaining},
+                "message": _("Publicación por categoría iniciada en segundo plano. En cola: %s.") % queued,
                 "type": "success",
                 "sticky": False,
             },
