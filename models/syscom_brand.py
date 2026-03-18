@@ -1,7 +1,5 @@
 import time
 
-from collections import defaultdict
-
 from odoo import _, fields, models
 from odoo.exceptions import UserError
 
@@ -139,8 +137,6 @@ class SyscomBrand(models.Model):
             stock=params.get_param("sync_syscom.brand_products_stock"),
         ) or []
 
-        category_product_links = defaultdict(list)
-
         for product in products:
             prod_syscom_id = str(product.get("producto_id") or product.get("id") or "").strip()
             if not prod_syscom_id:
@@ -172,14 +168,8 @@ class SyscomBrand(models.Model):
                 )
                 if cat_record:
                     prod_cat_ids.append(cat_record.id)
-                    category_product_links[cat_record.id].append(prod_record.id)
             if prod_cat_ids:
                 prod_record.category_ids = [(6, 0, prod_cat_ids)]
-
-        # Vincular productos a categorías para vista inversa
-        for cat_id, prod_ids in category_product_links.items():
-            category = self.env["sync.syscom.category"].browse(cat_id)
-            category.product_ids = [(6, 0, list(set(prod_ids)))]
 
         # Registrar metadatos de lote
         self.env["sync.syscom.log"].sudo().create({
@@ -386,7 +376,7 @@ class SyscomBrand(models.Model):
                 continue
 
             # Recoger productos para obtener categorías nivel 3 también
-            products = self._fetch_all_brand_products(
+            products, _pages_done, _pages_total, _total_count = self._fetch_all_brand_products(
                 client,
                 syscom_id,
                 stock=params.get_param("sync_syscom.brand_products_stock"),
@@ -539,12 +529,11 @@ class SyscomBrand(models.Model):
 
         allowed_set = set(allowed_category_syscom_ids or [])
         created = updated = kept = 0
-        category_product_links = defaultdict(list)
         Product = self.env["sync.syscom.product"]
         products_synced = Product.browse([])
 
         for brand in brands:
-            products = self._fetch_all_brand_products(
+            products, _pages_done, _pages_total, _total_count = self._fetch_all_brand_products(
                 client,
                 brand.syscom_id,
                 stock=params.get_param("sync_syscom.brand_products_stock"),
@@ -589,15 +578,9 @@ class SyscomBrand(models.Model):
 
                 if cat_ids:
                     prod_record.category_ids = [(6, 0, cat_ids)]
-                    for cid in cat_ids:
-                        category_product_links[cid].append(prod_record.id)
 
                 products_synced |= prod_record
                 kept += 1
-
-        for cat_id, prod_ids in category_product_links.items():
-            category = self.env["sync.syscom.category"].browse(cat_id)
-            category.product_ids = [(6, 0, list(set(prod_ids)))]
 
         return {
             "created": created,
@@ -658,10 +641,9 @@ class SyscomBrand(models.Model):
         client = SyscomClient(base_url=base_url, token=token, timeout=timeout)
 
         created = updated = 0
-        category_product_links = defaultdict(list)
 
         for brand in self:
-            products = self._fetch_all_brand_products(
+            products, _pages_done, _pages_total, _total_count = self._fetch_all_brand_products(
                 client,
                 brand.syscom_id,
                 stock=params.get_param("sync_syscom.brand_products_stock"),
@@ -699,13 +681,8 @@ class SyscomBrand(models.Model):
                     )
                     if cat_record:
                         cat_ids.append(cat_record.id)
-                        category_product_links[cat_record.id].append(prod_record.id)
                 if cat_ids:
                     prod_record.category_ids = [(6, 0, cat_ids)]
-
-        for cat_id, prod_ids in category_product_links.items():
-            category = self.env["sync.syscom.category"].browse(cat_id)
-            category.product_ids = [(6, 0, list(set(prod_ids)))]
 
         self.env["sync.syscom.log"].create({
             "name": _("Sincronización de modelos (todas las categorías de la marca)"),
@@ -740,8 +717,6 @@ class SyscomBrand(models.Model):
         created = 0
         updated = 0
         category_links = {}
-        category_product_links = defaultdict(list)
-        product_records = {}
 
         for brand in brands:
             syscom_id = str(brand.get("id") or "").strip()
@@ -787,7 +762,7 @@ class SyscomBrand(models.Model):
                     record.category_ids = [(6, 0, category_ids)]
 
             # Productos por marca (con categorías)
-            products = self._fetch_all_brand_products(
+            products, _pages_done, _pages_total, _total_count = self._fetch_all_brand_products(
                 client,
                 syscom_id,
                 stock=params.get_param("sync_syscom.brand_products_stock"),
@@ -811,7 +786,6 @@ class SyscomBrand(models.Model):
                     prod_record.write(prod_vals)
                 else:
                     prod_record = self.env["sync.syscom.product"].create(prod_vals)
-                product_records[prod_syscom_id] = prod_record.id
 
                 cat_ids = []
                 for category in product.get("categorías") or product.get("categorias") or []:
@@ -824,7 +798,6 @@ class SyscomBrand(models.Model):
                     )
                     if cat_record:
                         cat_ids.append(cat_record.id)
-                        category_product_links[cat_record.id].append(prod_record.id)
                 if cat_ids:
                     prod_record.category_ids = [(6, 0, cat_ids)]
 
@@ -839,11 +812,6 @@ class SyscomBrand(models.Model):
                 "duration": duration,
             },
         })
-
-        # Vincular productos a categorías (m2m) después de haberlos creado/actualizado
-        for cat_id, prod_ids in category_product_links.items():
-            category = self.env["sync.syscom.category"].browse(cat_id)
-            category.product_ids = [(6, 0, list(set(prod_ids)))]
 
         return {
             "type": "ir.actions.client",

@@ -82,6 +82,54 @@ class SyscomProduct(models.Model):
         syscom_category.write({"public_category_id": public_cat.id})
         return public_cat
 
+    def _raise_if_default_code_conflicts(self, default_code, syscom_product_id, exclude_template=None):
+        """Block accidental writes over non-SYSCOM products sharing the same SKU."""
+        default_code = (default_code or "").strip()
+        syscom_product_id = (syscom_product_id or "").strip()
+        if not default_code:
+            return
+
+        Template = self.env["product.template"].sudo()
+        domain = [("default_code", "=", default_code)]
+        if exclude_template:
+            domain.append(("id", "!=", exclude_template.id))
+
+        for template in Template.search(domain):
+            template_syscom_id = (template.syscom_product_id or "").strip()
+            if template.syscom_is_product and template_syscom_id == syscom_product_id:
+                continue
+            raise UserError(
+                "Ya existe un producto Odoo con SKU '%s' y no está vinculado a este producto SYSCOM. "
+                "Resuelve la colisión antes de publicar para evitar sobrescribir otro producto."
+                % default_code
+            )
+
+    def _find_template_for_syscom_product(self, default_code, syscom_product_id):
+        """Find an existing SYSCOM-managed template without touching unrelated products."""
+        default_code = (default_code or "").strip()
+        syscom_product_id = (syscom_product_id or "").strip()
+        Template = self.env["product.template"].sudo()
+
+        if syscom_product_id:
+            template = Template.search([("syscom_product_id", "=", syscom_product_id)], limit=1)
+            if template:
+                self._raise_if_default_code_conflicts(default_code, syscom_product_id, exclude_template=template)
+                return template
+
+        if default_code:
+            candidates = Template.search([
+                ("default_code", "=", default_code),
+                ("syscom_is_product", "=", True),
+            ])
+            for template in candidates:
+                template_syscom_id = (template.syscom_product_id or "").strip()
+                if not template_syscom_id or template_syscom_id == syscom_product_id:
+                    self._raise_if_default_code_conflicts(default_code, syscom_product_id, exclude_template=template)
+                    return template
+            self._raise_if_default_code_conflicts(default_code, syscom_product_id)
+
+        return Template.browse()
+
     def _update_template_pricelists_and_cost(self, template, prices_mxn, params):
         """Update pricelists (list, special, discount) and standard_price."""
 
@@ -651,7 +699,7 @@ class SyscomProduct(models.Model):
         product.write(product_vals)
 
         # Crear/actualizar plantilla de producto Odoo
-        template = self.env["product.template"].search([("default_code", "=", default_code)], limit=1)
+        template = self._find_template_for_syscom_product(default_code, product.syscom_id)
         created = False
         template_vals = {
             "name": name,
@@ -729,15 +777,28 @@ class SyscomProduct(models.Model):
             })
 
         # Actualizar plantillas existentes por default_code
-        templates = self.env["product.template"].search([])
+        templates = self.env["product.template"].search([
+            ("syscom_is_product", "=", True),
+            ("syscom_product_id", "!=", False),
+        ])
+        products_by_syscom_id = {
+            (prod.syscom_id or "").strip(): prod
+            for prod in products
+            if (prod.syscom_id or "").strip()
+        }
+        products_by_model = {
+            (prod.model or "").strip(): prod
+            for prod in products
+            if (prod.model or "").strip()
+        }
         updated_templates = 0
         for tmpl in templates:
-            if not tmpl.default_code:
-                continue
-            prod = products.filtered(lambda p: p.model == tmpl.default_code or p.syscom_id == tmpl.default_code)
+            prod = products_by_syscom_id.get((tmpl.syscom_product_id or "").strip())
+            if not prod and tmpl.default_code:
+                prod = products_by_model.get((tmpl.default_code or "").strip())
             if not prod:
                 continue
-            price_mxn = self._to_float(prod[0].price_list) * exchange_rate
+            price_mxn = self._to_float(prod.price_list) * exchange_rate
             tmpl.write({"list_price": price_mxn})
             updated_templates += 1
 
@@ -864,6 +925,7 @@ class SyscomProduct(models.Model):
                     price_discounts_mxn = price_discounts
 
                 tmpl.write({
+                    "list_price": price_list_mxn,
                     "syscom_stock_new": stock_new,
                     "syscom_stock_synced_at": now,
                     "syscom_api_ok": True,
@@ -1013,7 +1075,7 @@ class SyscomProduct(models.Model):
                 product.write(product_vals)
 
                 # Crear/actualizar plantilla de producto Odoo
-                template = self.env["product.template"].search([("default_code", "=", default_code)], limit=1)
+                template = self._find_template_for_syscom_product(default_code, product.syscom_id)
                 template_vals = {
                     "name": name,
                     "default_code": default_code,
