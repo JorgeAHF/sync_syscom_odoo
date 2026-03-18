@@ -589,6 +589,89 @@ class SyscomBrand(models.Model):
             "products": products_synced,
         }
 
+    def _sync_single_brand_for_scope(self, client, brand_payload, allowed_category_syscom_ids=None, params=None):
+        """Sync one brand and its scoped models for a category publication job."""
+        params = params or self.env["ir.config_parameter"].sudo()
+        allowed_set = set(allowed_category_syscom_ids or [])
+
+        syscom_id = str(brand_payload.get("id") or "").strip()
+        if not syscom_id:
+            return {
+                "status": "skipped",
+                "created": 0,
+                "updated": 0,
+                "kept": 0,
+                "products": self.env["sync.syscom.product"].browse([]),
+                "brand": self.browse([]),
+            }
+
+        categories = brand_payload.get("categorías") or brand_payload.get("categorias") or []
+        detail = None
+        if not categories:
+            try:
+                detail = client.get_brand_detail(syscom_id, timeout=10) or {}
+                categories = detail.get("categorías") or detail.get("categorias") or []
+            except UserError as exc:
+                return {
+                    "status": "timeout",
+                    "error": str(exc),
+                    "created": 0,
+                    "updated": 0,
+                    "kept": 0,
+                    "products": self.env["sync.syscom.product"].browse([]),
+                    "brand": self.browse([]),
+                }
+
+        cat_ids = []
+        for category in categories:
+            cat_syscom_id = str(category.get("id") or "").strip()
+            if not cat_syscom_id:
+                continue
+            if allowed_set and cat_syscom_id not in allowed_set:
+                continue
+            cat_record = self.env["sync.syscom.category"].search(
+                [("syscom_id", "=", cat_syscom_id)],
+                limit=1,
+            )
+            if cat_record:
+                cat_ids.append(cat_record.id)
+
+        if not cat_ids:
+            return {
+                "status": "skipped",
+                "created": 0,
+                "updated": 0,
+                "kept": 0,
+                "products": self.env["sync.syscom.product"].browse([]),
+                "brand": self.browse([]),
+            }
+
+        if detail is None:
+            detail = client.get_brand_detail(syscom_id, timeout=10) or {}
+
+        vals = {
+            "syscom_id": syscom_id,
+            "name": detail.get("titulo") or brand_payload.get("nombre") or syscom_id,
+            "title": detail.get("titulo") or brand_payload.get("nombre") or "",
+            "description": detail.get("descripcion") or "",
+            "logo_url": detail.get("logo") or "",
+            "active": True,
+            "selected": True,
+        }
+        brand_record = self.search([("syscom_id", "=", syscom_id)], limit=1)
+        if brand_record:
+            brand_record.write(vals)
+        else:
+            brand_record = self.create(vals)
+        brand_record.category_ids = [(6, 0, cat_ids)]
+
+        stats = self._sync_models_for_brands(brand_record, allowed_category_syscom_ids=allowed_set)
+        stats.update({
+            "status": "matched",
+            "brand": brand_record,
+        })
+        return stats
+
     def action_publish_scope_brands(self):
         """Sync models for selected brands and queue them for background publication."""
         brands = self

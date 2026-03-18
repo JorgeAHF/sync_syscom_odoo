@@ -461,7 +461,7 @@ class SyscomCategory(models.Model):
         return self.search([("id", "child_of", categories.ids)])
 
     def action_publish_scope_categories(self, include_children=None):
-        """Sync and queue publication for products inside selected categories."""
+        """Schedule category publication in background."""
         categories = self.exists()
         if not categories:
             categories = self.search([("selected", "=", True)])
@@ -471,46 +471,17 @@ class SyscomCategory(models.Model):
         params = self.env["ir.config_parameter"].sudo()
         if include_children is None:
             include_children = params.get_param("sync_syscom.publish_include_subcategories", "1").lower() in ("1", "true", "yes")
-        scope_categories = categories._get_scope_categories(include_children=bool(include_children))
-        selected_syscom_ids = set(scope_categories.mapped("syscom_id"))
-        stats_brands = self._sync_brands_for_scope(selected_syscom_ids, chunk_limit=None)
-
-        brand_model = self.env["sync.syscom.brand"]
-        stats_models = brand_model._sync_models_for_brands(
-            stats_brands["brands"],
-            allowed_category_syscom_ids=selected_syscom_ids,
+        job = self.env["sync.syscom.publish.job"].create_for_categories(
+            categories,
+            include_children=bool(include_children),
         )
-        queued = self.env["sync.syscom.product"].queue_products_for_background_publish(
-            stats_models["products"],
-            source_label="Categorias (%s)" % ", ".join(scope_categories.mapped("syscom_id")),
-        )
-        if not queued:
-            raise UserError(_("No se encontraron productos para publicar en el alcance seleccionado."))
-
-        self.env["sync.syscom.log"].sudo().create({
-            "name": _("Publicación por categorías (programada)"),
-            "kind": "info",
-            "message": _(
-                "Categorías base: %(base)s. Scope: %(scope)s (subcategorías=%(child)s). "
-                "Marcas vinculadas: %(brands)s. Modelos sync: %(models)s (creados %(created)s, actualizados %(updated)s). En cola: %(queued)s."
-            ) % {
-                "base": ", ".join(categories.mapped("syscom_id")),
-                "scope": len(scope_categories),
-                "child": "sí" if include_children else "no",
-                "brands": stats_brands["kept"],
-                "models": stats_models["kept"],
-                "created": stats_models["created"],
-                "updated": stats_models["updated"],
-                "queued": queued,
-            },
-        })
 
         return {
             "type": "ir.actions.client",
             "tag": "display_notification",
             "params": {
                 "title": _("Sync SYSCOM"),
-                "message": _("Publicación por categoría iniciada en segundo plano. En cola: %s.") % queued,
+                "message": _("Trabajo de publicación por categoría programado: %s.") % job.display_name,
                 "type": "success",
                 "sticky": False,
             },

@@ -59,5 +59,15 @@
             <field name="interval_type">minutes</field>
             <field name="active">True</field>
         </record>
+
+        <record id="cron_sync_syscom_publish_category_jobs" model="ir.cron">
+            <field name="name">Sync Syscom: publicar categorías (background)</field>
+            <field name="model_id" ref="model_sync_syscom_publish_job"/>
+            <field name="state">code</field>
+            <field name="code">model.cron_process_publish_jobs()</field>
+            <field name="interval_number">1</field>
+            <field name="interval_type">minutes</field>
+            <field name="active">True</field>
+        </record>
     </data>
 </odoo>
