@@ -6,8 +6,8 @@
             <field name="name">Configuración SyncSyscom</field>
             <field name="res_model">res.config.settings</field>
             <field name="view_mode">form</field>
-            <!-- Render inside the standard Settings shell and filter blocks by module -->
-            <field name="target">inline</field>
+            <!-- In Odoo 19, valid targets are current/new/fullscreen/main -->
+            <field name="target">current</field>
             <field name="context">{'module': 'sync_syscom'}</field>
         </record>
 
