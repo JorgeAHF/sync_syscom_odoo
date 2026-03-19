@@ -29,6 +29,16 @@
             <field name="active">False</field>
         </record>
 
+        <record id="cron_sync_syscom_sync_jobs" model="ir.cron">
+            <field name="name">Sync Syscom: catálogo (jobs)</field>
+            <field name="model_id" ref="model_sync_syscom_sync_job"/>
+            <field name="state">code</field>
+            <field name="code">model.cron_process_sync_jobs()</field>
+            <field name="interval_number">1</field>
+            <field name="interval_type">minutes</field>
+            <field name="active">True</field>
+        </record>
+
         <record id="cron_sync_syscom_exchange_rate" model="ir.cron">
             <field name="name">Sync Syscom: tipo de cambio semanal</field>
             <field name="model_id" ref="model_sync_syscom_product"/>

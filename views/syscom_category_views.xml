@@ -164,7 +164,7 @@ action = records.action_publish_scope_categories(include_children=False)
             <field name="binding_type">action</field>
             <field name="state">code</field>
             <field name="code">
-action = env["sync.syscom.category"].action_start_sync_pipeline()
+action = env["sync.syscom.category"].action_start_category_sync()
             </field>
         </record>
 

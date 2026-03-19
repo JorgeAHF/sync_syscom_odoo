@@ -17,6 +17,7 @@
         "views/syscom_brand_views.xml",
         "views/syscom_product_views.xml",
         "views/publish_job_views.xml",
+        "views/sync_job_views.xml",
         "views/sync_log_views.xml",
         "views/menu.xml",
         "views/website_sale_product_stock.xml",

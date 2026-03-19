@@ -56,46 +56,25 @@ class SyscomBrand(models.Model):
     def _get_selected_categories(self):
         return self.env["sync.syscom.category"].search([("selected", "=", True)])
 
-    def _deactivate_cron_safely(self, cron):
-        """Deactivate cron even when the same job is running (bypasses write guard)."""
-        if not cron or not cron.id:
-            return
-        # Use a fresh cursor to avoid locks/guards on the running transaction.
-        with self.pool.cursor() as cr:
-            try:
-                cr.execute("UPDATE ir_cron SET active=%s WHERE id=%s", (False, cron.id))
-            except Exception:
-                # If we cannot flip it (e.g., lock), just return; next loop will retry.
-                return
-        cron.invalidate_cache(["active"])
+    def _build_syscom_client(self):
+        params = self.env["ir.config_parameter"].sudo()
+        token = (params.get_param("sync_syscom.syscom_api_token") or "").strip()
+        if not token:
+            raise UserError(_("Configura el token en Ajustes antes de sincronizar."))
+
+        base_url = params.get_param("sync_syscom.syscom_base_url") or "https://developers.syscom.mx/api/v1"
+        timeout = int(params.get_param("sync_syscom.syscom_timeout") or 30)
+        return SyscomClient(base_url=base_url, token=token, timeout=timeout), params
 
     def action_start_brand_sync(self):
-        """Reinicia offsets de marcas/productos y arranca la cron de marcas en background."""
-        params = self.env["ir.config_parameter"].sudo()
-        params.set_param("sync_syscom.brand_sync_offset", 0)
-        params.set_param("sync_syscom.brand_products_sync_offset", 0)
-
-        # Registrar en log el inicio de la sincronización
-        self.env["sync.syscom.log"].sudo().create({
-            "name": _("Inicio sincronización de marcas/modelos (cron)"),
-            "kind": "info",
-            "message": _("Se programó la sincronización completa de marcas y productos."),
-        })
-
-        cron_brand = self.env.ref("sync_syscom.cron_sync_syscom_brands_full", raise_if_not_found=False).sudo()
-        cron_prod = self.env.ref("sync_syscom.cron_sync_syscom_brand_products", raise_if_not_found=False).sudo()
-        for cron in (cron_brand, cron_prod):
-            if cron:
-                self._deactivate_cron_safely(cron)
-        if cron_brand:
-            cron_brand.active = True
-            cron_brand.nextcall = fields.Datetime.now()
+        """Programa la sincronización de marcas y modelos en background."""
+        job = self.env["sync.syscom.sync.job"].create_brands_products_job()
         return {
             "type": "ir.actions.client",
             "tag": "display_notification",
             "params": {
                 "title": _("Sync SYSCOM"),
-                "message": _("Sincronización de marcas y productos iniciada en segundo plano."),
+                "message": _("Trabajo de sincronización de marcas/modelos programado: %s.") % job.display_name,
                 "type": "success",
                 "sticky": False,
             },
@@ -136,6 +115,8 @@ class SyscomBrand(models.Model):
             brand_record.syscom_id,
             stock=params.get_param("sync_syscom.brand_products_stock"),
         ) or []
+        created = 0
+        updated = 0
 
         for product in products:
             prod_syscom_id = str(product.get("producto_id") or product.get("id") or "").strip()
@@ -154,8 +135,10 @@ class SyscomBrand(models.Model):
             )
             if prod_record:
                 prod_record.write(prod_vals)
+                updated += 1
             else:
                 prod_record = self.env["sync.syscom.product"].create(prod_vals)
+                created += 1
 
             prod_cat_ids = []
             for cat in product.get("categorías") or product.get("categorias") or []:
@@ -183,97 +166,63 @@ class SyscomBrand(models.Model):
             },
         })
 
-        return len(products)
+        return {
+            "fetched": len(products),
+            "created": created,
+            "updated": updated,
+            "pages_done": pages_done,
+            "pages_total": pages_total,
+            "total_count": total_count,
+        }
 
     def cron_sync_all_brands_batch(self):
-        """Ejecutado por cron: procesa un lote; se desactiva solo al completar todas las marcas."""
-        self.action_sync_all_brands_batch()
-        # Si el offset volvió a cero, ya dimos la vuelta completa: desactivar el cron
-        params = self.env["ir.config_parameter"].sudo()
-        offset = int(params.get_param("sync_syscom.brand_sync_offset") or 0)
-        if offset == 0:
-            cron = self.env.ref("sync_syscom.cron_sync_syscom_brands_full", raise_if_not_found=False).sudo()
-            if cron:
-                self._deactivate_cron_safely(cron)
-            # Activar cron de productos de marcas
-            cron_prod = self.env.ref("sync_syscom.cron_sync_syscom_brand_products", raise_if_not_found=False).sudo()
-            if cron_prod:
-                cron_prod.active = True
-                cron_prod.nextcall = fields.Datetime.now()
+        """Compatibilidad hacia atrás: delega al worker de jobs."""
+        self.env["sync.syscom.sync.job"].cron_process_sync_jobs()
 
     def cron_sync_brand_products_batch(self):
-        """Procesa en lotes la sincronización de productos/stubs por marca."""
-        params = self.env["ir.config_parameter"].sudo()
-        token = (params.get_param("sync_syscom.syscom_api_token") or "").strip()
-        if not token:
-            return
-        base_url = params.get_param("sync_syscom.syscom_base_url") or "https://developers.syscom.mx/api/v1"
-        timeout = int(params.get_param("sync_syscom.syscom_timeout") or 30)
-        chunk_limit = int(params.get_param("sync_syscom.brand_products_chunk_limit") or 5)
-        client = SyscomClient(base_url=base_url, token=token, timeout=timeout)
+        """Compatibilidad hacia atrás: delega al worker de jobs."""
+        self.env["sync.syscom.sync.job"].cron_process_sync_jobs()
 
-        brands = self.search([], order="id")
-        total = len(brands)
-        offset = int(params.get_param("sync_syscom.brand_products_sync_offset") or 0)
-        if offset >= total:
-            offset = 0
-
-        slice_brands = brands[offset : offset + chunk_limit]
-        processed = 0
-        for brand in slice_brands:
-            try:
-                self._sync_brand_products_for_brand(client, brand, params)
-                processed += 1
-            except Exception as exc:
-                self.env["sync.syscom.log"].sudo().create({
-                    "name": _("Sync productos marca %(b)s") % {"b": brand.syscom_id},
-                    "kind": "error",
-                    "message": _("Error sincronizando marca: %s") % exc,
-                })
-            offset += 1
-
-        if offset >= total:
-            offset = 0
-        params.set_param("sync_syscom.brand_products_sync_offset", offset)
-
-        if offset == 0:
-            cron = self.env.ref("sync_syscom.cron_sync_syscom_brand_products", raise_if_not_found=False).sudo()
-            if cron:
-                self._deactivate_cron_safely(cron)
-
-    def action_sync_all_brands_batch(self):
-        """Sincroniza marcas en lotes, usando offset persistido para evitar timeouts."""
-        params = self.env["ir.config_parameter"].sudo()
-        token = (params.get_param("sync_syscom.syscom_api_token") or "").strip()
-        if not token:
-            raise UserError(_("Configura el token en Ajustes antes de sincronizar."))
-
-        base_url = params.get_param("sync_syscom.syscom_base_url") or "https://developers.syscom.mx/api/v1"
-        timeout = int(params.get_param("sync_syscom.syscom_timeout") or 30)
-        detail_timeout = int(params.get_param("sync_syscom.brand_detail_timeout") or 3)
-        chunk_limit = int(params.get_param("sync_syscom.brand_detail_chunk_limit") or 10)
-        client = SyscomClient(base_url=base_url, token=token, timeout=timeout)
+    def _sync_brands_batch(self, client=None, offset=0, chunk_limit=None, detail_timeout=None):
+        client, params = (client, None) if client else self._build_syscom_client()
+        if params is None:
+            params = self.env["ir.config_parameter"].sudo()
+        if not chunk_limit:
+            chunk_limit = int(params.get_param("sync_syscom.brand_detail_chunk_limit") or 10)
+        if detail_timeout is None:
+            detail_timeout = int(params.get_param("sync_syscom.brand_detail_timeout") or 3)
 
         brands = client.get_brands() or []
         total = len(brands)
-        offset = int(params.get_param("sync_syscom.brand_sync_offset") or 0)
+        if total == 0:
+            return {
+                "total": 0,
+                "processed": 0,
+                "created": 0,
+                "updated": 0,
+                "timeout_skip": 0,
+                "next_offset": 0,
+                "finished": True,
+            }
+
+        offset = max(int(offset or 0), 0)
         if offset >= total:
             offset = 0
 
         slice_brands = brands[offset : offset + chunk_limit]
         processed = 0
-        created = updated = timeout_skip = 0
+        created = 0
+        updated = 0
+        timeout_skip = 0
 
         for brand in slice_brands:
             syscom_id = str(brand.get("id") or "").strip()
             if not syscom_id:
-                offset += 1
                 continue
             try:
                 detail = client.get_brand_detail(syscom_id, timeout=detail_timeout) or {}
             except UserError:
                 timeout_skip += 1
-                offset += 1
                 continue
 
             categories = detail.get("categorías") or detail.get("categorias") or []
@@ -308,27 +257,100 @@ class SyscomBrand(models.Model):
             if cat_ids:
                 record.category_ids = [(6, 0, cat_ids)]
 
-            # Productos/stubs y categorías complementarias
-            self._sync_brand_products_for_brand(client, record, params)
-
             processed += 1
-            offset += 1
 
-        # Persist new offset
+        next_offset = offset + len(slice_brands)
+        finished = next_offset >= total
+        if finished:
+            next_offset = 0
+
+        return {
+            "total": total,
+            "processed": len(slice_brands),
+            "created": created,
+            "updated": updated,
+            "timeout_skip": timeout_skip,
+            "next_offset": next_offset,
+            "finished": finished,
+        }
+
+    def _sync_local_brand_products_batch(self, client=None, offset=0, chunk_limit=None):
+        client, params = (client, None) if client else self._build_syscom_client()
+        if params is None:
+            params = self.env["ir.config_parameter"].sudo()
+        if not chunk_limit:
+            chunk_limit = int(params.get_param("sync_syscom.brand_products_chunk_limit") or 5)
+
+        brands = self.search([], order="id")
+        total = len(brands)
+        if total == 0:
+            return {
+                "total": 0,
+                "processed": 0,
+                "created_products": 0,
+                "updated_products": 0,
+                "fetched_products": 0,
+                "errors": 0,
+                "next_offset": 0,
+                "finished": True,
+            }
+
+        offset = max(int(offset or 0), 0)
         if offset >= total:
             offset = 0
-        params.set_param("sync_syscom.brand_sync_offset", offset)
+
+        slice_brands = brands[offset : offset + chunk_limit]
+        processed = 0
+        created_products = 0
+        updated_products = 0
+        fetched_products = 0
+        errors = 0
+
+        for brand in slice_brands:
+            try:
+                result = self._sync_brand_products_for_brand(client, brand, params)
+                processed += 1
+                created_products += result["created"]
+                updated_products += result["updated"]
+                fetched_products += result["fetched"]
+            except Exception as exc:
+                errors += 1
+                self.env["sync.syscom.log"].sudo().create({
+                    "name": _("Sync productos marca %(b)s") % {"b": brand.syscom_id},
+                    "kind": "error",
+                    "message": _("Error sincronizando marca: %s") % exc,
+                })
+
+        next_offset = offset + len(slice_brands)
+        finished = next_offset >= total
+        if finished:
+            next_offset = 0
+
+        return {
+            "total": total,
+            "processed": len(slice_brands),
+            "created_products": created_products,
+            "updated_products": updated_products,
+            "fetched_products": fetched_products,
+            "errors": errors,
+            "next_offset": next_offset,
+            "finished": finished,
+        }
+
+    def action_sync_all_brands_batch(self):
+        """Procesa un solo lote de marcas sin tocar crons ni offsets globales."""
+        batch = self._sync_brands_batch()
 
         self.env["sync.syscom.log"].create({
             "name": _("Sincronización de marcas (lotes)"),
             "kind": "info",
             "message": _("Marcas procesadas: %(p)s (creadas %(c)s, actualizadas %(u)s, timeout %(t)s). Quedan: %(r)s")
             % {
-                "p": processed,
-                "c": created,
-                "u": updated,
-                "t": timeout_skip,
-                "r": max(total - offset, 0) if processed else max(total - offset, 0),
+                "p": batch["processed"],
+                "c": batch["created"],
+                "u": batch["updated"],
+                "t": batch["timeout_skip"],
+                "r": max(batch["total"] - batch["next_offset"], 0),
             },
         })
 
@@ -339,11 +361,11 @@ class SyscomBrand(models.Model):
                 "title": _("Sync SYSCOM"),
                 "message": _("Marcas procesadas: %(p)s (creadas %(c)s, actualizadas %(u)s, timeout %(t)s). Pendientes aprox: %(r)s.")
                 % {
-                    "p": processed,
-                    "c": created,
-                    "u": updated,
-                    "t": timeout_skip,
-                    "r": max(total - offset, 0),
+                    "p": batch["processed"],
+                    "c": batch["created"],
+                    "u": batch["updated"],
+                    "t": batch["timeout_skip"],
+                    "r": max(batch["total"] - batch["next_offset"], 0),
                 },
                 "type": "success",
                 "sticky": False,

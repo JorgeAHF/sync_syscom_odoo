@@ -3,4 +3,5 @@ access_sync_syscom_category_manager,access.sync.syscom.category.manager,model_sy
 access_sync_syscom_brand_manager,access.sync.syscom.brand.manager,model_sync_syscom_brand,sync_syscom.group_sync_syscom_manager,1,1,1,1
 access_sync_syscom_log_manager,access.sync.syscom.log.manager,model_sync_syscom_log,sync_syscom.group_sync_syscom_manager,1,1,1,1
 access_sync_syscom_publish_job_manager,access.sync.syscom.publish.job.manager,model_sync_syscom_publish_job,sync_syscom.group_sync_syscom_manager,1,1,1,1
+access_sync_syscom_sync_job_manager,access.sync.syscom.sync.job.manager,model_sync_syscom_sync_job,sync_syscom.group_sync_syscom_manager,1,1,1,1
 access_sync_syscom_product_manager,access.sync.syscom.product.manager,model_sync_syscom_product,sync_syscom.group_sync_syscom_manager,1,1,1,1

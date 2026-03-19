@@ -112,7 +112,7 @@ class SyscomCategory(models.Model):
         for record in self:
             record.model_count = len(record.product_ids)
 
-    def action_sync_syscom(self):
+    def _build_syscom_client(self):
         params = self.env["ir.config_parameter"].sudo()
         token = (params.get_param("sync_syscom.syscom_api_token") or "").strip()
         if not token:
@@ -120,12 +120,50 @@ class SyscomCategory(models.Model):
 
         base_url = params.get_param("sync_syscom.syscom_base_url") or "https://developers.syscom.mx/api/v1"
         timeout = int(params.get_param("sync_syscom.syscom_timeout") or 30)
-        client = SyscomClient(base_url=base_url, token=token, timeout=timeout)
+        return SyscomClient(base_url=base_url, token=token, timeout=timeout), params
+
+    def _get_category_chunk_limit(self):
+        params = self.env["ir.config_parameter"].sudo()
+        try:
+            chunk_limit = int(params.get_param("sync_syscom.category_chunk_limit") or 5)
+        except Exception:
+            chunk_limit = 5
+        return max(chunk_limit, 1)
+
+    def _sync_public_categories_subset(self, categories):
+        categories = categories.sudo().exists()
+        if not categories:
+            return
+        for category in categories.sorted(
+            key=lambda rec: (int(rec.level or 0), int(rec.syscom_sequence or 10), rec.name or "")
+        ):
+            self._ensure_public_category(category)
+
+    def _sync_categories_batch(self, client=None, offset=0, chunk_limit=None):
+        client = client or self._build_syscom_client()[0]
+        chunk_limit = chunk_limit or self._get_category_chunk_limit()
+
+        categories = client.get_categories() or []
+        total = len(categories)
+        if total == 0:
+            return {
+                "total": 0,
+                "processed": 0,
+                "created": 0,
+                "updated": 0,
+                "next_offset": 0,
+                "finished": True,
+                "duration": 0.0,
+            }
+
+        offset = max(int(offset or 0), 0)
+        if offset >= total:
+            offset = 0
 
         start_time = time.monotonic()
-        categories = client.get_categories() or []
         data_map = {}
         parent_map = {}
+        synced_records = self.browse([])
 
         def parse_level(value, fallback):
             try:
@@ -157,17 +195,21 @@ class SyscomCategory(models.Model):
                 parent_map[syscom_id] = str(parent_syscom_id)
             return syscom_id, level_val
 
+        def iter_entries(entries):
+            if isinstance(entries, list):
+                for entry in entries:
+                    yield entry
+            elif isinstance(entries, dict):
+                yield entries
+
         queue = []
-        category_chunk_limit = int(params.get_param("sync_syscom.category_chunk_limit") or 5)
-        offset = int(params.get_param("sync_syscom.category_sync_offset") or 0)
-        categories_slice = categories[offset : offset + category_chunk_limit]
-        for i, category in enumerate(categories_slice):
-            item = add_category(category, level_hint=1, sequence=i * 10)
+        categories_slice = categories[offset : offset + chunk_limit]
+        for index, category in enumerate(categories_slice):
+            item = add_category(category, level_hint=1, sequence=index * 10)
             if item:
                 queue.append(item)
 
         visited = set()
-        # Recursivo hasta 3 niveles usando detalle de cada categoría
         while queue:
             current_syscom_id, current_level = queue.pop(0)
             if current_syscom_id in visited:
@@ -187,13 +229,6 @@ class SyscomCategory(models.Model):
 
             add_category(detail, parent_syscom_id=parent_origin_id, level_hint=current_level or 1)
 
-            def iter_entries(entries):
-                if isinstance(entries, list):
-                    for entry in entries:
-                        yield entry
-                elif isinstance(entries, dict):
-                    yield entries
-
             for origin in iter_entries(origin_entries):
                 item = add_category(origin, level_hint=current_level - 1 if current_level else None)
                 if item and (item[1] or 0) < 3:
@@ -201,12 +236,12 @@ class SyscomCategory(models.Model):
 
             subcats = detail.get("subcategorías") or detail.get("subcategorias") or []
             subcats_list = list(iter_entries(subcats))
-            for i, subcat in enumerate(subcats_list):
+            for index, subcat in enumerate(subcats_list):
                 item = add_category(
                     subcat,
                     parent_syscom_id=detail.get("id"),
                     level_hint=(current_level or 1) + 1,
-                    sequence=i * 10,
+                    sequence=index * 10,
                 )
                 if item and (item[1] or 0) < 3:
                     queue.append((item[0], item[1] or ((current_level or 1) + 1)))
@@ -219,35 +254,48 @@ class SyscomCategory(models.Model):
                 record.write(values)
                 updated += 1
             else:
-                self.create(values)
+                record = self.create(values)
                 created += 1
+            synced_records |= record
 
         for child_syscom_id, parent_syscom_id in parent_map.items():
             child = self.search([("syscom_id", "=", child_syscom_id)], limit=1)
             parent = self.search([("syscom_id", "=", parent_syscom_id)], limit=1)
             if child and parent:
                 child.parent_id = parent.id
+                synced_records |= child | parent
 
-        # Replicar árbol de categorías también en eCommerce (product.public.category)
-        # Visible para todos los websites: website_id = False
-        self._sync_public_categories_from_syscom()
+        self._sync_public_categories_subset(synced_records)
 
-        duration = time.monotonic() - start_time
-        offset += len(categories_slice)
-        if offset >= len(categories):
-            offset = 0
-        params.set_param("sync_syscom.category_sync_offset", offset)
+        processed = len(categories_slice)
+        next_offset = offset + processed
+        finished = next_offset >= total
+        if finished:
+            next_offset = 0
+
+        return {
+            "total": total,
+            "processed": processed,
+            "created": created,
+            "updated": updated,
+            "next_offset": next_offset,
+            "finished": finished,
+            "duration": time.monotonic() - start_time,
+        }
+
+    def action_sync_syscom(self):
+        batch = self._sync_categories_batch()
 
         self.env["sync.syscom.log"].create({
             "name": _("Sincronización de categorías"),
             "kind": "info",
             "message": _("Categorías creadas: %(created)s, actualizadas: %(updated)s. Duración: %(duration).2fs. Offset: %(offset)s/%(total)s")
             % {
-                "created": created,
-                "updated": updated,
-                "duration": duration,
-                "offset": offset,
-                "total": len(categories),
+                "created": batch["created"],
+                "updated": batch["updated"],
+                "duration": batch["duration"],
+                "offset": batch["next_offset"],
+                "total": batch["total"],
             },
         })
 
@@ -257,7 +305,12 @@ class SyscomCategory(models.Model):
             "params": {
                 "title": _("Sync SYSCOM"),
                 "message": _("Sincronización completada. Creadas: %(created)s, actualizadas: %(updated)s. Offset: %(offset)s/%(total)s.")
-                % {"created": created, "updated": updated, "offset": offset, "total": len(categories)},
+                % {
+                    "created": batch["created"],
+                    "updated": batch["updated"],
+                    "offset": batch["next_offset"],
+                    "total": batch["total"],
+                },
                 "type": "success",
                 "sticky": False,
             },
@@ -488,86 +541,35 @@ class SyscomCategory(models.Model):
         }
 
     def action_sync_categories_and_brands(self):
-        """Programa sincronización completa en background (categorías y luego marcas)."""
-        params = self.env["ir.config_parameter"].sudo()
-        # Resetear offset de marcas
-        params.set_param("sync_syscom.brand_sync_offset", 0)
-        # Activar cron de categorías (que al terminar activará la de marcas)
-        cron_cat = self.env.ref("sync_syscom.cron_sync_syscom_categories", raise_if_not_found=False).sudo()
-
-        # Registrar en log que la sincronización fue programada
-        self.env["sync.syscom.log"].sudo().create({
-            "name": _("Inicio sincronización categorías → marcas"),
-            "kind": "info",
-            "message": _("Se programó la sincronización en segundo plano de categorías y luego marcas."),
-        })
-        if cron_cat:
-            cron_cat.active = True
-            cron_cat.nextcall = fields.Datetime.now()
+        """Programa sincronización completa en background."""
+        job = self.env["sync.syscom.sync.job"].create_full_catalog_job()
         return {
             "type": "ir.actions.client",
             "tag": "display_notification",
             "params": {
                 "title": _("Sync SYSCOM"),
-                "message": _("Sincronización en proceso en segundo plano (categorías y luego marcas)."),
+                "message": _("Trabajo de sincronización completa programado: %s.") % job.display_name,
                 "type": "success",
                 "sticky": False,
             },
         }
 
     def cron_sync_categories(self):
-        """Cron: sincroniza categorías en lotes; al terminar enciende cron de marcas."""
-        params = self.env["ir.config_parameter"].sudo()
-        offset = int(params.get_param("sync_syscom.category_sync_offset") or 0)
-        # Si ya se marcó como finalizado (-1), salir rápido
-        if offset == -1:
-            return
+        """Compatibilidad hacia atrás: delega al worker de jobs."""
+        self.env["sync.syscom.sync.job"].cron_process_sync_jobs()
 
-        self.action_sync_syscom()
-        offset = int(params.get_param("sync_syscom.category_sync_offset") or 0)
-        categories = SyscomClient(
-            base_url=params.get_param("sync_syscom.syscom_base_url") or "https://developers.syscom.mx/api/v1",
-            token=params.get_param("sync_syscom.syscom_api_token") or "",
-            timeout=int(params.get_param("sync_syscom.syscom_timeout") or 30),
-        ).get_categories() or []
-        if offset == 0 or offset >= len(categories):
-            # marcar como finalizado para evitar loops y activar cron de marcas
-            params.set_param("sync_syscom.category_sync_offset", -1)
-            cron_brand = self.env.ref("sync_syscom.cron_sync_syscom_brands_full", raise_if_not_found=False).sudo()
-            if cron_brand:
-                cron_brand.active = True
-                cron_brand.nextcall = fields.Datetime.now()
-
-    def action_start_sync_pipeline(self):
-        """Reinicia offsets y activa pipeline de crons (categorías -> marcas -> productos)."""
-        params = self.env["ir.config_parameter"].sudo()
-        params.set_param("sync_syscom.category_sync_offset", 0)
-        params.set_param("sync_syscom.brand_sync_offset", 0)
-        params.set_param("sync_syscom.brand_products_sync_offset", 0)
-
-        # Registrar en log el inicio del pipeline completo
-        self.env["sync.syscom.log"].sudo().create({
-            "name": _("Inicio pipeline de sincronización"),
-            "kind": "info",
-            "message": _("Se programó la sincronización de categorías, marcas y productos."),
-        })
-
-        cron_cat = self.env.ref("sync_syscom.cron_sync_syscom_categories", raise_if_not_found=False).sudo()
-        cron_brand = self.env.ref("sync_syscom.cron_sync_syscom_brands_full", raise_if_not_found=False).sudo()
-        cron_prod = self.env.ref("sync_syscom.cron_sync_syscom_brand_products", raise_if_not_found=False).sudo()
-        for cron in (cron_cat, cron_brand, cron_prod):
-            if cron:
-                cron.active = False
-        if cron_cat:
-            cron_cat.active = True
-            cron_cat.nextcall = fields.Datetime.now()
+    def action_start_category_sync(self):
+        job = self.env["sync.syscom.sync.job"].create_categories_only_job()
         return {
             "type": "ir.actions.client",
             "tag": "display_notification",
             "params": {
                 "title": _("Sync SYSCOM"),
-                "message": _("Sincronización en segundo plano iniciada (categorías → marcas → productos)."),
+                "message": _("Trabajo de sincronización de categorías programado: %s.") % job.display_name,
                 "type": "success",
                 "sticky": False,
             },
         }
+
+    def action_start_sync_pipeline(self):
+        return self.action_sync_categories_and_brands()

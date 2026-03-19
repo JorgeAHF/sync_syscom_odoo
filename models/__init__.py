@@ -3,6 +3,7 @@ from . import res_partner
 from . import syscom_client
 from . import sync_log
 from . import publish_job
+from . import sync_job
 from . import syscom_category
 from . import syscom_brand
 from . import syscom_product

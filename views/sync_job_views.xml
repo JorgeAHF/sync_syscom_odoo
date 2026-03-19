@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+        <record id="view_sync_syscom_sync_job_tree" model="ir.ui.view">
+            <field name="name">sync.syscom.sync.job.list</field>
+            <field name="model">sync.syscom.sync.job</field>
+            <field name="arch" type="xml">
+                <list string="Trabajos de sincronización" create="false">
+                    <field name="create_date"/>
+                    <field name="name"/>
+                    <field name="job_type"/>
+                    <field name="state"/>
+                    <field name="stage"/>
+                    <field name="processed_categories"/>
+                    <field name="processed_brands"/>
+                    <field name="processed_product_brands"/>
+                    <field name="last_error"/>
+                </list>
+            </field>
+        </record>
+
+        <record id="view_sync_syscom_sync_job_form" model="ir.ui.view">
+            <field name="name">sync.syscom.sync.job.form</field>
+            <field name="model">sync.syscom.sync.job</field>
+            <field name="arch" type="xml">
+                <form string="Trabajo de sincronización">
+                    <sheet>
+                        <group>
+                            <field name="name" readonly="1"/>
+                            <field name="job_type" readonly="1"/>
+                            <field name="state" readonly="1"/>
+                            <field name="stage" readonly="1"/>
+                            <field name="started_at" readonly="1"/>
+                            <field name="finished_at" readonly="1"/>
+                        </group>
+                        <group string="Categorías">
+                            <field name="category_offset" readonly="1"/>
+                            <field name="processed_categories" readonly="1"/>
+                            <field name="total_categories" readonly="1"/>
+                            <field name="created_categories" readonly="1"/>
+                            <field name="updated_categories" readonly="1"/>
+                        </group>
+                        <group string="Marcas">
+                            <field name="brand_offset" readonly="1"/>
+                            <field name="processed_brands" readonly="1"/>
+                            <field name="total_brands" readonly="1"/>
+                            <field name="created_brands" readonly="1"/>
+                            <field name="updated_brands" readonly="1"/>
+                            <field name="skipped_brand_timeouts" readonly="1"/>
+                        </group>
+                        <group string="Modelos">
+                            <field name="product_offset" readonly="1"/>
+                            <field name="processed_product_brands" readonly="1"/>
+                            <field name="total_product_brands" readonly="1"/>
+                            <field name="fetched_products" readonly="1"/>
+                            <field name="created_products" readonly="1"/>
+                            <field name="updated_products" readonly="1"/>
+                            <field name="product_errors" readonly="1"/>
+                        </group>
+                        <group string="Errores">
+                            <field name="last_error" readonly="1"/>
+                        </group>
+                    </sheet>
+                </form>
+            </field>
+        </record>
+
+        <record id="view_sync_syscom_sync_job_search" model="ir.ui.view">
+            <field name="name">sync.syscom.sync.job.search</field>
+            <field name="model">sync.syscom.sync.job</field>
+            <field name="arch" type="xml">
+                <search string="Buscar trabajos de sincronización">
+                    <field name="name"/>
+                    <field name="job_type"/>
+                    <filter name="pending" string="Pendientes" domain="[('state', '=', 'pending')]"/>
+                    <filter name="running" string="Procesando" domain="[('state', '=', 'running')]"/>
+                    <filter name="done" string="Terminados" domain="[('state', '=', 'done')]"/>
+                    <filter name="error" string="Con error" domain="[('state', '=', 'error')]"/>
+                </search>
+            </field>
+        </record>
+
+        <record id="action_sync_syscom_sync_job" model="ir.actions.act_window">
+            <field name="name">Trabajos de sincronización</field>
+            <field name="res_model">sync.syscom.sync.job</field>
+            <field name="view_mode">list,form</field>
+        </record>
+    </data>
+</odoo>
