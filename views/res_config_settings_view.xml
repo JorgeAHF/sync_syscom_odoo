@@ -74,7 +74,7 @@
                                         <label class="col-lg-4 o_light_label" for="syscom_cost_discount_pct"/>
                                         <div class="col-lg-8">
                                             <field name="syscom_cost_discount_pct" class="oe_inline"/>
-                                            <span class="text-muted ms-2">% sobre precio especial para calcular costo.</span>
+                                            <span class="text-muted ms-2">% sobre precio con descuento para calcular costo.</span>
                                         </div>
                                     </div>
                                     <div class="row mt16">

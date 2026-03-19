@@ -31,7 +31,7 @@ class ProductTemplate(models.Model):
     )
     syscom_cost_margin_pct = fields.Float(
         string="Margen costo SYSCOM (%)",
-        help="Porcentaje de descuento aplicado sobre precio especial SYSCOM para calcular el costo.",
+        help="Porcentaje de descuento aplicado sobre precio con descuento SYSCOM para calcular el costo.",
     )
 
     def _has_syscom_vendor(self):

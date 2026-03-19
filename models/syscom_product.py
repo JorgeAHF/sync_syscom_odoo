@@ -130,6 +130,12 @@ class SyscomProduct(models.Model):
 
         return Template.browse()
 
+    def _compute_syscom_cost(self, prices_mxn, params):
+        """Return standard_price using SYSCOM discount price as base."""
+        cost_pct = float(params.get_param("sync_syscom.cost_discount_pct") or 4.0)
+        discount_price = self._to_float((prices_mxn or {}).get("discount_price_mxn"))
+        return discount_price * (1 - cost_pct / 100.0), cost_pct
+
     def _update_template_pricelists_and_cost(self, template, prices_mxn, params):
         """Update pricelists (list, special, discount) and standard_price."""
 
@@ -159,7 +165,6 @@ class SyscomProduct(models.Model):
             "sync_syscom.pricelist_discount_id",
             "sync_syscom.pricelist_syscom_discount",
         )
-        cost_pct = float(params.get_param("sync_syscom.cost_discount_pct") or 4.0)
         PricelistItem = self.env["product.pricelist.item"].sudo()
 
         def upsert(pricelist_id, price):
@@ -187,11 +192,30 @@ class SyscomProduct(models.Model):
         upsert(pricelist_discount_id, prices_mxn.get("discount_price_mxn", 0.0))
 
         # costo (standard_price)
-        cost = prices_mxn.get("special_price_mxn", 0.0) * (1 - cost_pct / 100.0)
+        cost, cost_pct = self._compute_syscom_cost(prices_mxn, params)
         vals_cost = {"standard_price": cost}
         if template._fields.get("syscom_cost_margin_pct"):
             vals_cost["syscom_cost_margin_pct"] = cost_pct
         template.sudo().write(vals_cost)
+
+    def _recompute_syscom_template_cost(self, template, staging_product=None, params=None):
+        """Recalculate standard_price for one SYSCOM template from local staging prices."""
+        template = template.sudo()
+        params = params or self.env["ir.config_parameter"].sudo()
+        staging_product = staging_product or self.search(
+            [("syscom_id", "=", (template.syscom_product_id or "").strip())],
+            limit=1,
+        )
+        if not staging_product:
+            return False
+
+        prices_mxn = {
+            "list_price_mxn": staging_product.price_list_mxn,
+            "special_price_mxn": staging_product.price_special_mxn,
+            "discount_price_mxn": staging_product.price_discounts_mxn,
+        }
+        self._update_template_pricelists_and_cost(template, prices_mxn, params)
+        return True
 
     def _sync_template_unspsc_from_sat(self, template, sat_key, sat_description=None):
         """Set UNSPSC Category (Many2one) on product.template using SYSCOM sat_key.
@@ -798,8 +822,15 @@ class SyscomProduct(models.Model):
                 prod = products_by_model.get((tmpl.default_code or "").strip())
             if not prod:
                 continue
-            price_mxn = self._to_float(prod.price_list) * exchange_rate
-            tmpl.write({"list_price": price_mxn})
+            price_list_mxn = self._to_float(prod.price_list) * exchange_rate
+            price_special_mxn = self._to_float(prod.price_special) * exchange_rate
+            price_discounts_mxn = self._to_float(prod.price_discounts) * exchange_rate
+            tmpl.write({"list_price": price_list_mxn})
+            self._update_template_pricelists_and_cost(tmpl, {
+                "list_price_mxn": price_list_mxn,
+                "special_price_mxn": price_special_mxn,
+                "discount_price_mxn": price_discounts_mxn,
+            }, self.env["ir.config_parameter"].sudo())
             updated_templates += 1
 
         self.env["sync.syscom.log"].create({
@@ -1193,6 +1224,19 @@ class SyscomProduct(models.Model):
             "params": {
                 "title": "Sync SYSCOM",
                 "message": "Publicación iniciada en segundo plano (%s productos)." % queued,
+                "type": "success",
+                "sticky": False,
+            },
+        }
+
+    def action_start_recompute_syscom_costs(self):
+        job = self.env["sync.syscom.cost.job"].create_recompute_all_job()
+        return {
+            "type": "ir.actions.client",
+            "tag": "display_notification",
+            "params": {
+                "title": "Sync SYSCOM",
+                "message": "Trabajo de recálculo de costos programado: %s." % job.display_name,
                 "type": "success",
                 "sticky": False,
             },

@@ -57,10 +57,10 @@ class ResConfigSettings(models.TransientModel):
         help="Controla si los precios traídos se convierten con el tipo de cambio o ya vienen en MXN.",
     )
     syscom_cost_discount_pct = fields.Float(
-        string="Descuento % sobre precio especial para costo",
+        string="Descuento % sobre precio con descuento para costo",
         default=4.0,
         config_parameter="sync_syscom.cost_discount_pct",
-        help="Porcentaje de descuento aplicado al precio especial para calcular el costo (standard_price).",
+        help="Porcentaje de descuento aplicado al precio con descuento de SYSCOM para calcular el costo (standard_price).",
     )
 
     syscom_stock_refresh_enabled = fields.Boolean(

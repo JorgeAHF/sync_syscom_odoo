@@ -13,12 +13,30 @@
             </field>
         </record>
 
+        <record id="server_action_recompute_syscom_costs" model="ir.actions.server">
+            <field name="name">Recalcular costos SYSCOM</field>
+            <field name="model_id" ref="model_sync_syscom_product"/>
+            <field name="binding_model_id" ref="model_sync_syscom_product"/>
+            <field name="binding_type">action</field>
+            <field name="state">code</field>
+            <field name="code">
+                action = env["sync.syscom.product"].action_start_recompute_syscom_costs()
+            </field>
+        </record>
+
         <record id="view_sync_syscom_product_tree" model="ir.ui.view">
             <field name="name">sync.syscom.product.list</field>
             <field name="model">sync.syscom.product</field>
             <field name="arch" type="xml">
                 <list string="Modelos SYSCOM">
                     <header>
+                        <button
+                            name="%(server_action_recompute_syscom_costs)d"
+                            type="action"
+                            string="Recalcular costos SYSCOM"
+                            class="btn-secondary"
+                            groups="sync_syscom.group_sync_syscom_manager"
+                        />
                         <button
                             name="%(server_action_publish_syscom_products)d"
                             type="action"

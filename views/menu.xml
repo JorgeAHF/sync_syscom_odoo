@@ -57,6 +57,13 @@ action = env["sync.syscom.category"].action_start_sync_pipeline()
             groups="sync_syscom.group_sync_syscom_manager"
         />
         <menuitem
+            id="menu_sync_syscom_cost_jobs"
+            name="Trabajos costos"
+            parent="menu_sync_syscom_sync"
+            action="action_sync_syscom_cost_job"
+            groups="sync_syscom.group_sync_syscom_manager"
+        />
+        <menuitem
             id="menu_sync_syscom_category_publish_jobs"
             name="Trabajos categorías"
             parent="menu_sync_syscom_sync"
