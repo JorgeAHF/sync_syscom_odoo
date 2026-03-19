@@ -10,9 +10,8 @@
                     <field name="name"/>
                     <field name="state"/>
                     <field name="include_children"/>
-                    <field name="processed_brands"/>
-                    <field name="total_brands"/>
-                    <field name="matched_brands"/>
+                    <field name="processed_products"/>
+                    <field name="total_products"/>
                     <field name="queued_products"/>
                     <field name="last_error"/>
                 </list>
@@ -33,19 +32,17 @@
                             <field name="finished_at" readonly="1"/>
                         </group>
                         <group string="Progreso">
-                            <field name="brand_offset" readonly="1"/>
-                            <field name="processed_brands" readonly="1"/>
-                            <field name="total_brands" readonly="1"/>
-                            <field name="matched_brands" readonly="1"/>
-                            <field name="skipped_brands" readonly="1"/>
-                            <field name="timeout_brands" readonly="1"/>
-                            <field name="created_products" readonly="1"/>
-                            <field name="updated_products" readonly="1"/>
+                            <field name="product_offset" readonly="1"/>
+                            <field name="processed_products" readonly="1"/>
+                            <field name="total_products" readonly="1"/>
                             <field name="queued_products" readonly="1"/>
                         </group>
                         <group string="Categorías">
                             <field name="category_ids" widget="many2many_tags" readonly="1"/>
                             <field name="scope_category_ids" widget="many2many_tags" readonly="1"/>
+                        </group>
+                        <group string="Productos">
+                            <field name="product_ids" widget="many2many_tags" readonly="1"/>
                         </group>
                         <group string="Errores">
                             <field name="last_error" readonly="1"/>
