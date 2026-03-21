@@ -16,6 +16,56 @@ class SyscomProduct(models.Model):
         except (TypeError, ValueError):
             return 0.0
 
+    @staticmethod
+    def _to_optional_float(value):
+        """Return float or False when the API value is blank/unusable."""
+        if value in (None, "", False):
+            return False
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return False
+
+    @staticmethod
+    def _normalize_feature_lines(detail):
+        if not isinstance(detail, dict):
+            return []
+        raw = (
+            detail.get("caracteristicas")
+            or detail.get("características")
+            or detail.get("features")
+            or []
+        )
+        if isinstance(raw, str):
+            raw = raw.splitlines()
+        if not isinstance(raw, (list, tuple)):
+            return []
+        lines = []
+        for item in raw:
+            text = str(item or "").strip()
+            if not text:
+                continue
+            lines.append(text)
+        return lines
+
+    def _extract_extended_detail_values(self, detail):
+        detail = detail or {}
+        return {
+            "warranty_text": (detail.get("garantia") or "").strip() or False,
+            "weight_value": self._to_optional_float(detail.get("peso")),
+            "height_value": self._to_optional_float(detail.get("alto")),
+            "length_value": self._to_optional_float(detail.get("largo")),
+            "width_value": self._to_optional_float(detail.get("ancho")),
+            "features_lines": self._normalize_feature_lines(detail),
+        }
+
+    def _detail_has_extended_values(self, detail):
+        values = self._extract_extended_detail_values(detail)
+        return any(
+            values[key]
+            for key in ("warranty_text", "weight_value", "height_value", "length_value", "width_value")
+        ) or bool(values["features_lines"])
+
     def _get_deepest_category(self, cat_ids):
         """Return the category (sync.syscom.category) with highest level; fallback first."""
         if not cat_ids:
@@ -216,6 +266,66 @@ class SyscomProduct(models.Model):
         }
         self._update_template_pricelists_and_cost(template, prices_mxn, params)
         return True
+
+    def _build_staging_extended_vals(self, detail):
+        extended = self._extract_extended_detail_values(detail)
+        return {
+            "warranty_text": extended["warranty_text"],
+            "weight_value": extended["weight_value"] or False,
+            "height_value": extended["height_value"] or False,
+            "length_value": extended["length_value"] or False,
+            "width_value": extended["width_value"] or False,
+            "features_json": extended["features_lines"] or [],
+        }
+
+    def _apply_extended_values_to_product(self, product, detail):
+        product.write(self._build_staging_extended_vals(detail))
+
+    def _apply_extended_values_to_template(self, template, detail, staging_product=None):
+        template = template.sudo()
+        extended = self._extract_extended_detail_values(detail)
+        if staging_product:
+            extended = {
+                "warranty_text": staging_product.warranty_text or extended["warranty_text"],
+                "weight_value": staging_product.weight_value or extended["weight_value"],
+                "height_value": staging_product.height_value or extended["height_value"],
+                "length_value": staging_product.length_value or extended["length_value"],
+                "width_value": staging_product.width_value or extended["width_value"],
+                "features_lines": staging_product.features_json or extended["features_lines"],
+            }
+
+        vals = {
+            "syscom_warranty": extended["warranty_text"] or False,
+            "syscom_height_cm": extended["height_value"] or False,
+            "syscom_length_cm": extended["length_value"] or False,
+            "syscom_width_cm": extended["width_value"] or False,
+            "syscom_features_json": extended["features_lines"] or [],
+        }
+        if "weight" in template._fields:
+            vals["weight"] = extended["weight_value"] or False
+        template.write(vals)
+        template._set_syscom_ecommerce_description(extended["features_lines"])
+
+    def _find_template_for_existing_product(self, product):
+        Template = self.env["product.template"].sudo()
+        syscom_product_id = (product.syscom_id or "").strip()
+        default_code = (product.model or "").strip()
+
+        if syscom_product_id:
+            template = Template.search([
+                ("syscom_is_product", "=", True),
+                ("syscom_product_id", "=", syscom_product_id),
+            ], limit=1)
+            if template:
+                return template
+
+        if default_code:
+            return Template.search([
+                ("syscom_is_product", "=", True),
+                ("default_code", "=", default_code),
+            ], limit=1)
+
+        return Template.browse()
 
     def _sync_template_unspsc_from_sat(self, template, sat_key, sat_description=None):
         """Set UNSPSC Category (Many2one) on product.template using SYSCOM sat_key.
@@ -589,6 +699,11 @@ class SyscomProduct(models.Model):
     features_json = fields.Json(string="Características (JSON)")
     images_json = fields.Json(string="Imágenes (JSON)")
     resources_json = fields.Json(string="Recursos (JSON)")
+    warranty_text = fields.Char(string="Garantía")
+    weight_value = fields.Float(string="Peso (kg)")
+    height_value = fields.Float(string="Alto (cm)")
+    length_value = fields.Float(string="Largo (cm)")
+    width_value = fields.Float(string="Ancho (cm)")
     description = fields.Text(string="Descripción")
     payload = fields.Json(string="Payload SYSCOM")
     synced_at = fields.Datetime(string="Sincronizado en")
@@ -736,6 +851,7 @@ class SyscomProduct(models.Model):
             "synced_at": fields.Datetime.now(),
             "sync_error": False,
         }
+        product_vals.update(self._build_staging_extended_vals(detail))
 
         # Categorías del detalle
         cat_ids = []
@@ -774,6 +890,8 @@ class SyscomProduct(models.Model):
         else:
             template = self.env["product.template"].create(template_vals)
             created = True
+
+        self._apply_extended_values_to_template(template, detail, staging_product=product)
 
         self._ensure_syscom_vendor_on_template(template)
 
@@ -946,9 +1064,11 @@ class SyscomProduct(models.Model):
                     "exchange_rate": exchange_rate,
                     "exchange_rate_date": fields.Date.context_today(self),
                     "existence_json": existencia,
+                    "payload": detail,
                     "synced_at": now,
                     "sync_error": False,
                 })
+                self._apply_extended_values_to_product(prod, detail)
             except Exception as exc:
                 prod.write({"sync_error": str(exc), "synced_at": now})
 
@@ -1001,6 +1121,10 @@ class SyscomProduct(models.Model):
                     "special_price_mxn": price_special_mxn,
                     "discount_price_mxn": price_discounts_mxn,
                 }, params)
+                staging_product = self.search([("syscom_id", "=", tmpl.syscom_product_id)], limit=1)
+                if staging_product:
+                    self._apply_extended_values_to_product(staging_product, detail)
+                self._apply_extended_values_to_template(tmpl, detail, staging_product=staging_product)
                 # Enforce documents visibility on the website (URLs from SYSCOM resources)
                 self._ensure_template_documents_published(tmpl)
                 updated += 1
@@ -1121,6 +1245,7 @@ class SyscomProduct(models.Model):
                     "synced_at": fields.Datetime.now(),
                     "sync_error": False,
                 }
+                product_vals.update(self._build_staging_extended_vals(detail))
 
                 # Categorías del detalle
                 cat_ids = []
@@ -1159,6 +1284,8 @@ class SyscomProduct(models.Model):
                 else:
                     template = self.env["product.template"].create(template_vals)
                     created += 1
+
+                self._apply_extended_values_to_template(template, detail, staging_product=product)
 
                 # Ensure vendor is set for dropship procurement
                 self._ensure_syscom_vendor_on_template(template)
@@ -1299,6 +1426,19 @@ class SyscomProduct(models.Model):
             "params": {
                 "title": "Sync SYSCOM",
                 "message": "Trabajo de recálculo de costos programado: %s." % job.display_name,
+                "type": "success",
+                "sticky": False,
+            },
+        }
+
+    def action_start_sync_extended_product_data(self):
+        job = self.env["sync.syscom.product.data.job"].create_sync_all_job()
+        return {
+            "type": "ir.actions.client",
+            "tag": "display_notification",
+            "params": {
+                "title": "Sync SYSCOM",
+                "message": "Trabajo de datos extendidos programado: %s." % job.display_name,
                 "type": "success",
                 "sticky": False,
             },

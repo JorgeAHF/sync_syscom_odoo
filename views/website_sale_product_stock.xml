@@ -19,5 +19,58 @@
                 </div>
             </t>
         </xpath>
+
+        <xpath expr="//section[@id='product_detail']" position="inside">
+            <t t-set="tmpl" t-value="product.product_tmpl_id if product._name == 'product.product' else product"/>
+            <t t-if="tmpl.syscom_product_id and (tmpl.syscom_warranty or tmpl.weight or tmpl.syscom_height_cm or tmpl.syscom_length_cm or tmpl.syscom_width_cm or tmpl.syscom_features_json)">
+                <div class="container my-3">
+                    <div class="card border-0 shadow-sm">
+                        <div class="card-body">
+                            <div class="row g-4">
+                                <div class="col-12 col-lg-5">
+                                    <h5 class="mb-3">Detalles del producto</h5>
+                                    <ul class="list-unstyled mb-0">
+                                        <li class="mb-2" t-if="tmpl.syscom_warranty">
+                                            <strong>Garantía:</strong>
+                                            <span t-esc="tmpl.syscom_warranty"/>
+                                        </li>
+                                        <li class="mb-2" t-if="tmpl.weight">
+                                            <strong>Peso:</strong>
+                                            <span t-esc="('{:g}'.format(tmpl.weight))"/>
+                                            <span> kg</span>
+                                        </li>
+                                        <li class="mb-2" t-if="tmpl.syscom_height_cm or tmpl.syscom_length_cm or tmpl.syscom_width_cm">
+                                            <strong>Dimensiones:</strong>
+                                            <span>
+                                                <t t-if="tmpl.syscom_height_cm">
+                                                    <t t-esc="('{:g}'.format(tmpl.syscom_height_cm))"/> alto
+                                                </t>
+                                                <t t-if="tmpl.syscom_length_cm">
+                                                    <t t-if="tmpl.syscom_height_cm"> / </t>
+                                                    <t t-esc="('{:g}'.format(tmpl.syscom_length_cm))"/> largo
+                                                </t>
+                                                <t t-if="tmpl.syscom_width_cm">
+                                                    <t t-if="tmpl.syscom_height_cm or tmpl.syscom_length_cm"> / </t>
+                                                    <t t-esc="('{:g}'.format(tmpl.syscom_width_cm))"/> ancho
+                                                </t>
+                                                <span> cm</span>
+                                            </span>
+                                        </li>
+                                    </ul>
+                                </div>
+                                <div class="col-12 col-lg-7" t-if="tmpl.syscom_features_json">
+                                    <h5 class="mb-3">Características</h5>
+                                    <ul class="mb-0 ps-3">
+                                        <li t-foreach="tmpl.syscom_features_json" t-as="feature" t-key="feature" class="mb-2">
+                                            <span t-esc="feature"/>
+                                        </li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </t>
+        </xpath>
     </template>
 </odoo>

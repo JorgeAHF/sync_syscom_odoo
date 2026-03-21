@@ -1,3 +1,5 @@
+from html import escape
+
 from odoo import fields, models
 
 
@@ -33,6 +35,22 @@ class ProductTemplate(models.Model):
         string="Margen costo SYSCOM (%)",
         help="Porcentaje de descuento aplicado sobre precio con descuento SYSCOM para calcular el costo.",
     )
+    syscom_warranty = fields.Char(
+        string="Garantía",
+        help="Garantía devuelta por SYSCOM.",
+    )
+    syscom_height_cm = fields.Float(
+        string="Alto SYSCOM (cm)",
+    )
+    syscom_length_cm = fields.Float(
+        string="Largo SYSCOM (cm)",
+    )
+    syscom_width_cm = fields.Float(
+        string="Ancho SYSCOM (cm)",
+    )
+    syscom_features_json = fields.Json(
+        string="Características SYSCOM",
+    )
 
     def _has_syscom_vendor(self):
         """Return True if the template has at least one vendor marked as SYSCOM."""
@@ -42,3 +60,45 @@ class ProductTemplate(models.Model):
             if partner and getattr(partner, "syscom_is_vendor", False):
                 return True
         return False
+
+    def _get_ecommerce_description_field_name(self):
+        self.ensure_one()
+        candidate_names = [
+            "description_ecommerce",
+            "description_ecommerce_html",
+            "sale_ecommerce_description",
+            "description_sale_ecommerce",
+        ]
+        for name in candidate_names:
+            if name in self._fields:
+                return name
+
+        for name, info in self.fields_get().items():
+            if name == "website_description":
+                continue
+            label = (info.get("string") or "").strip().lower()
+            if (
+                "comercio electrónico" in label
+                or "comercio electronico" in label
+                or "ecommerce" in label
+                or "electronic commerce" in label
+            ):
+                return name
+        return False
+
+    def _set_syscom_ecommerce_description(self, feature_lines):
+        self.ensure_one()
+        field_name = self._get_ecommerce_description_field_name()
+        if not field_name:
+            return False
+
+        field = self._fields[field_name]
+        lines = [str(line).strip() for line in (feature_lines or []) if str(line).strip()]
+        if not lines:
+            value = False
+        elif field.type == "html":
+            value = "<ul>%s</ul>" % "".join("<li>%s</li>" % escape(line) for line in lines)
+        else:
+            value = "\n".join("- %s" % line for line in lines)
+        self.sudo().write({field_name: value})
+        return True
