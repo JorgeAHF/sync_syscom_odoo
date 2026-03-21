@@ -556,7 +556,11 @@ class SyscomProduct(models.Model):
     syscom_id = fields.Char(string="ID SYSCOM", required=True, index=True)
     model = fields.Char(string="Modelo", index=True)
     active = fields.Boolean(string="Activo", default=True)
-    selected = fields.Boolean(string="Sel", default=False)
+    selected = fields.Boolean(
+        string="Lote",
+        default=False,
+        help="Marca persistente para procesos batch manuales. No equivale a la selección visual de la vista.",
+    )
     brand_id = fields.Many2one("sync.syscom.brand", string="Marca")
     category_ids = fields.Many2many(
         "sync.syscom.category",
@@ -601,6 +605,7 @@ class SyscomProduct(models.Model):
         default="none",
         index=True,
     )
+    publish_enqueued_at = fields.Datetime(string="Encolado publicación")
     publish_started_at = fields.Datetime(string="Inicio publicación")
     publish_done_at = fields.Datetime(string="Fin publicación")
 
@@ -620,6 +625,33 @@ class SyscomProduct(models.Model):
         timeout = int(params.get_param("sync_syscom.syscom_timeout") or 30)
         from .syscom_client import SyscomClient
         return SyscomClient(base_url=base_url, token=token, timeout=timeout)
+
+    def _get_marked_for_batch(self):
+        return self.search([("selected", "=", True)])
+
+    def _require_records_for_view_action(self, label):
+        records = self.exists()
+        if not records:
+            raise UserError("Selecciona al menos un modelo en la vista antes de ejecutar '%s'." % label)
+        return records
+
+    def _require_marked_for_batch(self, label):
+        records = self._get_marked_for_batch()
+        if not records:
+            raise UserError("Marca al menos un modelo en la columna Lote antes de ejecutar '%s'." % label)
+        return records
+
+    def _describe_products_for_log(self, products, limit=10):
+        products = products.exists()
+        if not products:
+            return "sin productos"
+        chunks = []
+        for product in products[:limit]:
+            label = product.model or product.name or product.syscom_id or "?"
+            chunks.append("%s [%s]" % (label, product.syscom_id or "?"))
+        if len(products) > limit:
+            chunks.append("... +%s más" % (len(products) - limit))
+        return ", ".join(chunks)
 
     def _compute_exchange_rate_batch(self, client):
         """Return (exchange_rate, exchange_rate_date) for a batch."""
@@ -881,7 +913,7 @@ class SyscomProduct(models.Model):
         price_currency = params.get_param("sync_syscom.price_currency") or "usd"
 
         # 1) Refresh staging "selected" (mantener info interna)
-        selected = self.search([("selected", "=", True)])
+        selected = self._get_marked_for_batch()
         updated = failed = 0
         for prod in selected:
             try:
@@ -981,7 +1013,7 @@ class SyscomProduct(models.Model):
         self.env["sync.syscom.log"].sudo().create({
             "name": "Refresco stock/precios SYSCOM",
             "kind": "info",
-            "message": "Plantillas SYSCOM actualizadas: %(u)s, fallidas: %(f)s. Staging seleccionados: %(s)s" % {
+            "message": "Plantillas SYSCOM actualizadas: %(u)s, fallidas: %(f)s. Staging marcados en lote: %(s)s" % {
                 "u": updated,
                 "f": failed,
                 "s": len(selected),
@@ -999,7 +1031,9 @@ class SyscomProduct(models.Model):
         from .syscom_client import SyscomClient
         client = SyscomClient(base_url=base_url, token=token, timeout=timeout)
 
-        selected_products = self.search([("selected", "=", True)])
+        selected_products = self.exists() or self._get_marked_for_batch()
+        if not selected_products:
+            raise UserError("No hay modelos para publicar.")
         created = updated = failed = 0
 
         # Tipo de cambio (una semana) obtenido una vez por lote
@@ -1196,8 +1230,10 @@ class SyscomProduct(models.Model):
         if not products:
             return 0
 
+        queued_at = fields.Datetime.now()
         products.write({
             "publish_state": "pending",
+            "publish_enqueued_at": queued_at,
             "publish_started_at": False,
             "publish_done_at": False,
             "sync_error": False,
@@ -1207,23 +1243,49 @@ class SyscomProduct(models.Model):
         self.env["sync.syscom.log"].sudo().create({
             "name": "Publicación en background (inicio)",
             "kind": "info",
-            "message": "Se programó la publicación de %s productos. Origen: %s." % (len(products), source),
+            "message": "Se programó la publicación de %(count)s productos. Origen: %(source)s. Modelos: %(products)s."
+            % {
+                "count": len(products),
+                "source": source,
+                "products": self._describe_products_for_log(products),
+            },
         })
         return len(products)
 
     def action_start_publish_selected_background(self):
-        """Programar publicación de seleccionados en background (cron por lotes)."""
-        products = self.search([("selected", "=", True)])
-        if not products:
-            raise UserError("No hay productos seleccionados para publicar.")
-        queued = self.queue_products_for_background_publish(products, source_label="Modelos seleccionados")
+        """Compatibilidad: usa el modo explícito de marcados en lote."""
+        return self.action_start_publish_marked_background()
+
+    def action_start_publish_records_background(self):
+        products = self._require_records_for_view_action("Publicar selección vista")
+        queued = self.queue_products_for_background_publish(
+            products,
+            source_label="Selección vista (%s)" % ", ".join(products.mapped("syscom_id")),
+        )
+        return {
+            "type": "ir.actions.client",
+            "tag": "display_notification",
+            "params": {
+                "title": "Sync SYSCOM",
+                "message": "Publicación iniciada en segundo plano para la selección vista (%s productos)." % queued,
+                "type": "success",
+                "sticky": False,
+            },
+        }
+
+    def action_start_publish_marked_background(self):
+        products = self._require_marked_for_batch("Publicar marcados en lote")
+        queued = self.queue_products_for_background_publish(
+            products,
+            source_label="Marcados en lote (%s)" % ", ".join(products.mapped("syscom_id")),
+        )
 
         return {
             "type": "ir.actions.client",
             "tag": "display_notification",
             "params": {
                 "title": "Sync SYSCOM",
-                "message": "Publicación iniciada en segundo plano (%s productos)." % queued,
+                "message": "Publicación iniciada en segundo plano para marcados en lote (%s productos)." % queued,
                 "type": "success",
                 "sticky": False,
             },
@@ -1252,7 +1314,11 @@ class SyscomProduct(models.Model):
         if batch_size < 1:
             batch_size = 10
 
-        pending = self.search([("publish_state", "=", "pending")], order="id asc", limit=batch_size)
+        pending = self.search(
+            [("publish_state", "=", "pending")],
+            order="publish_enqueued_at desc, id desc",
+            limit=batch_size,
+        )
         if not pending:
             return
 
@@ -1292,6 +1358,11 @@ class SyscomProduct(models.Model):
         self.env["sync.syscom.log"].sudo().create({
             "name": "Publicación en background (batch)",
             "kind": "info",
-            "message": "Batch publicado. OK: %(ok)s, errores: %(err)s." % {"ok": ok, "err": err},
+            "message": "Batch publicado. Modelos: %(products)s. OK: %(ok)s, errores: %(err)s."
+            % {
+                "products": self._describe_products_for_log(pending),
+                "ok": ok,
+                "err": err,
+            },
         })
  

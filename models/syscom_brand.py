@@ -19,9 +19,9 @@ class SyscomBrand(models.Model):
     logo_url = fields.Char(string="Logo URL")
     active = fields.Boolean(string="Activo", default=True)
     selected = fields.Boolean(
-        string="Sincronizar",
+        string="Lote",
         default=False,
-        help="Incluye esta marca en acciones de sincronización manual.",
+        help="Marca persistente para procesos batch manuales. No equivale a la selección visual de la vista.",
     )
     category_ids = fields.Many2many(
         "sync.syscom.category",
@@ -55,6 +55,21 @@ class SyscomBrand(models.Model):
 
     def _get_selected_categories(self):
         return self.env["sync.syscom.category"].search([("selected", "=", True)])
+
+    def _get_marked_brands(self):
+        return self.search([("selected", "=", True)])
+
+    def _require_brands_for_view_action(self, label):
+        brands = self.exists()
+        if not brands:
+            raise UserError(_("Selecciona al menos una marca en la vista antes de ejecutar '%s'.") % label)
+        return brands
+
+    def _require_marked_brands(self, label):
+        brands = self._get_marked_brands()
+        if not brands:
+            raise UserError(_("Marca al menos una marca en la columna Lote antes de ejecutar '%s'.") % label)
+        return brands
 
     def _build_syscom_client(self):
         params = self.env["ir.config_parameter"].sudo()
@@ -504,26 +519,57 @@ class SyscomBrand(models.Model):
         }
 
     def action_sync_models_selected(self):
-        """Sincroniza modelos de marcas seleccionadas y categorías seleccionadas."""
+        """Compatibilidad: usa el modo explícito de marcados en lote."""
+        return self.action_sync_models_marked()
+
+    def action_sync_models_for_brands(self):
+        """Sincroniza modelos para marcas seleccionadas en la vista y categorías marcadas en lote."""
         categories_selected = self._get_selected_categories()
         selected_cat_ids = set(categories_selected.mapped("syscom_id"))
         if not selected_cat_ids:
-            raise UserError(_("Marca al menos una categoría (columna Sel) antes de sincronizar modelos."))
+            raise UserError(_("Marca al menos una categoría en la columna Lote antes de sincronizar modelos."))
 
-        brands = self.search([("selected", "=", True)])
-        if not brands:
-            raise UserError(_("Marca al menos una marca (columna Sel) antes de sincronizar modelos."))
+        brands = self._require_brands_for_view_action("Sincronizar modelos selección vista")
+        return self._run_sync_models_action(
+            brands,
+            selected_cat_ids,
+            source_label=_("selección vista"),
+        )
 
+    def action_sync_models_marked(self):
+        """Sincroniza modelos para marcas y categorías marcadas en lote."""
+        categories_selected = self._get_selected_categories()
+        selected_cat_ids = set(categories_selected.mapped("syscom_id"))
+        if not selected_cat_ids:
+            raise UserError(_("Marca al menos una categoría en la columna Lote antes de sincronizar modelos."))
+
+        brands = self._require_marked_brands("Sincronizar modelos marcados en lote")
+        return self._run_sync_models_action(
+            brands,
+            selected_cat_ids,
+            source_label=_("marcados en lote"),
+        )
+
+    def _run_sync_models_action(self, brands, selected_cat_ids, source_label):
         stats = self._sync_models_for_brands(brands, allowed_category_syscom_ids=selected_cat_ids)
         created = stats["created"]
         updated = stats["updated"]
         kept = stats["kept"]
 
         self.env["sync.syscom.log"].create({
-            "name": _("Sincronización de modelos (marcas/categorías seleccionadas)"),
+            "name": _("Sincronización de modelos (marcas/categorías)"),
             "kind": "info",
-            "message": _("Productos creados: %(created)s, actualizados: %(updated)s, retenidos: %(kept)s")
-            % {"created": created, "updated": updated, "kept": kept},
+            "message": _(
+                "Origen: %(source)s. Marcas: %(brands)s. Categorías lote: %(cats)s. Productos creados: %(created)s, actualizados: %(updated)s, retenidos: %(kept)s."
+            )
+            % {
+                "source": source_label,
+                "brands": ", ".join(brands.mapped("syscom_id")),
+                "cats": ", ".join(sorted(selected_cat_ids)),
+                "created": created,
+                "updated": updated,
+                "kept": kept,
+            },
         })
 
         return {
@@ -531,8 +577,10 @@ class SyscomBrand(models.Model):
             "tag": "display_notification",
             "params": {
                 "title": _("Sync SYSCOM"),
-                "message": _("Modelos sincronizados: %(kept)s (creados: %(created)s, actualizados: %(updated)s).")
-                % {"created": created, "updated": updated, "kept": kept},
+                "message": _(
+                    "Modelos sincronizados desde %(source)s: %(kept)s (creados: %(created)s, actualizados: %(updated)s)."
+                )
+                % {"source": source_label, "created": created, "updated": updated, "kept": kept},
                 "type": "success",
                 "sticky": False,
             },
@@ -612,26 +660,29 @@ class SyscomBrand(models.Model):
         }
 
     def action_publish_scope_brands(self):
-        """Sync models for selected brands and queue them for background publication."""
-        brands = self
-        if not brands:
-            brands = self.search([("selected", "=", True)])
-        if not brands:
-            raise UserError(_("Selecciona al menos una marca para publicar."))
+        """Sync models for brands selected in the current view and queue them."""
+        brands = self._require_brands_for_view_action("Publicar selección vista")
+        return self._run_publish_scope_brands(brands, source_label=_("selección vista"))
 
+    def action_publish_marked_brands(self):
+        brands = self._require_marked_brands("Publicar marcadas en lote")
+        return self._run_publish_scope_brands(brands, source_label=_("marcadas en lote"))
+
+    def _run_publish_scope_brands(self, brands, source_label):
         stats = self._sync_models_for_brands(brands, allowed_category_syscom_ids=None)
         queued = self.env["sync.syscom.product"].queue_products_for_background_publish(
             stats["products"],
-            source_label="Marcas (%s)" % ", ".join(brands.mapped("syscom_id")),
+            source_label="Marcas %s (%s)" % (source_label, ", ".join(brands.mapped("syscom_id"))),
         )
         if not queued:
-            raise UserError(_("No se encontraron productos para publicar en las marcas seleccionadas."))
+            raise UserError(_("No se encontraron productos para publicar en las marcas indicadas."))
 
         self.env["sync.syscom.log"].sudo().create({
             "name": _("Publicación por marcas (programada)"),
             "kind": "info",
-            "message": _("Marcas: %(brands)s. Modelos sync: %(kept)s (creados %(created)s, actualizados %(updated)s). En cola: %(queued)s.")
+            "message": _("Origen: %(source)s. Marcas: %(brands)s. Modelos sync: %(kept)s (creados %(created)s, actualizados %(updated)s). En cola: %(queued)s.")
             % {
+                "source": source_label,
                 "brands": ", ".join(brands.mapped("syscom_id")),
                 "kept": stats["kept"],
                 "created": stats["created"],
@@ -645,7 +696,8 @@ class SyscomBrand(models.Model):
             "tag": "display_notification",
             "params": {
                 "title": _("Sync SYSCOM"),
-                "message": _("Publicación por marca iniciada en segundo plano. En cola: %s.") % queued,
+                "message": _("Publicación por marca iniciada en segundo plano desde %(source)s. En cola: %(queued)s.")
+                % {"source": source_label, "queued": queued},
                 "type": "success",
                 "sticky": False,
             },

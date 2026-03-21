@@ -14,24 +14,46 @@ action = env["sync.syscom.brand"].action_start_brand_sync()
         </record>
 
         <record id="server_action_sync_syscom_models_selected" model="ir.actions.server">
-            <field name="name">Sincronizar modelos de marcas seleccionadas</field>
+            <field name="name">Sincronizar modelos selección vista</field>
             <field name="model_id" ref="model_sync_syscom_brand"/>
             <field name="binding_model_id" ref="model_sync_syscom_brand"/>
             <field name="binding_type">action</field>
             <field name="state">code</field>
             <field name="code">
-                action = env["sync.syscom.brand"].action_sync_models_selected()
+                action = records.action_sync_models_for_brands()
+            </field>
+        </record>
+
+        <record id="server_action_sync_syscom_models_marked" model="ir.actions.server">
+            <field name="name">Sincronizar modelos marcados en lote</field>
+            <field name="model_id" ref="model_sync_syscom_brand"/>
+            <field name="binding_model_id" ref="model_sync_syscom_brand"/>
+            <field name="binding_type">action</field>
+            <field name="state">code</field>
+            <field name="code">
+                action = env["sync.syscom.brand"].action_sync_models_marked()
             </field>
         </record>
 
         <record id="server_action_publish_scope_brands" model="ir.actions.server">
-            <field name="name">Publicar eCommerce (marcas seleccionadas)</field>
+            <field name="name">Publicar eCommerce selección vista</field>
             <field name="model_id" ref="model_sync_syscom_brand"/>
             <field name="binding_model_id" ref="model_sync_syscom_brand"/>
             <field name="binding_type">action</field>
             <field name="state">code</field>
             <field name="code">
 action = records.action_publish_scope_brands()
+            </field>
+        </record>
+
+        <record id="server_action_publish_scope_brands_marked" model="ir.actions.server">
+            <field name="name">Publicar eCommerce marcadas en lote</field>
+            <field name="model_id" ref="model_sync_syscom_brand"/>
+            <field name="binding_model_id" ref="model_sync_syscom_brand"/>
+            <field name="binding_type">action</field>
+            <field name="state">code</field>
+            <field name="code">
+action = env["sync.syscom.brand"].action_publish_marked_brands()
             </field>
         </record>
 
@@ -44,7 +66,14 @@ action = records.action_publish_scope_brands()
                         <button
                             name="%(server_action_sync_syscom_models_selected)d"
                             type="action"
-                            string="Sincronizar modelos seleccionados"
+                            string="Sync modelos selección vista"
+                            class="btn-secondary"
+                            groups="sync_syscom.group_sync_syscom_manager"
+                        />
+                        <button
+                            name="%(server_action_sync_syscom_models_marked)d"
+                            type="action"
+                            string="Sync modelos marcados lote"
                             class="btn-secondary"
                             groups="sync_syscom.group_sync_syscom_manager"
                         />
@@ -58,12 +87,19 @@ action = records.action_publish_scope_brands()
                         <button
                             name="%(server_action_publish_scope_brands)d"
                             type="action"
-                            string="Publicar eCommerce"
+                            string="Publicar selección vista"
                             class="btn-primary"
                             groups="sync_syscom.group_sync_syscom_manager"
                         />
+                        <button
+                            name="%(server_action_publish_scope_brands_marked)d"
+                            type="action"
+                            string="Publicar marcadas lote"
+                            class="btn-secondary"
+                            groups="sync_syscom.group_sync_syscom_manager"
+                        />
                     </header>
-                    <field name="selected" string="Sincronizar"/>
+                    <field name="selected" string="Lote"/>
                     <field name="name"/>
                     <field name="syscom_id"/>
                     <field name="title"/>
@@ -79,7 +115,7 @@ action = records.action_publish_scope_brands()
                 <form string="Marca SYSCOM">
                     <header>
                         <button name="action_sync_all_models" type="object" string="Sincronizar todos los modelos" class="btn-secondary" groups="sync_syscom.group_sync_syscom_manager"/>
-                        <button name="%(server_action_publish_scope_brands)d" type="action" string="Publicar eCommerce" class="btn-primary" groups="sync_syscom.group_sync_syscom_manager"/>
+                        <button name="%(server_action_publish_scope_brands)d" type="action" string="Publicar selección vista" class="btn-primary" groups="sync_syscom.group_sync_syscom_manager"/>
                     </header>
                     <sheet>
                         <group string="Identidad" colspan="2">
@@ -89,7 +125,7 @@ action = records.action_publish_scope_brands()
                             <field name="logo_url" widget="url"/>
                         </group>
                         <group string="Sincronización" colspan="2">
-                            <field name="selected" string="Sincronizar"/>
+                            <field name="selected" string="Lote"/>
                             <field name="active"/>
                             <field name="category_count" readonly="1"/>
                         </group>
@@ -173,7 +209,7 @@ action = records.action_publish_scope_brands()
                     <field name="name"/>
                     <field name="title"/>
                     <field name="syscom_id" string="ID SYSCOM"/>
-                    <filter name="selected" string="Para sincronizar" domain="[( 'selected', '=', True)]"/>
+                    <filter name="selected" string="Marcadas en lote" domain="[( 'selected', '=', True)]"/>
                     <filter name="active" string="Archivadas" domain="[( 'active', '=', False)]"/>
                     <separator/>
                     <field name="category_ids" filter_domain="[( 'category_ids', 'in', self )]"/>

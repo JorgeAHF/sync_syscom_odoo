@@ -3,13 +3,24 @@
     <data>
         <!-- Server action declared before being referenced -->
         <record id="server_action_publish_syscom_products" model="ir.actions.server">
-            <field name="name">Publicar productos seleccionados</field>
+            <field name="name">Publicar selección vista</field>
             <field name="model_id" ref="model_sync_syscom_product"/>
             <field name="binding_model_id" ref="model_sync_syscom_product"/>
             <field name="binding_type">action</field>
             <field name="state">code</field>
             <field name="code">
-                action = env["sync.syscom.product"].action_start_publish_selected_background()
+                action = records.action_start_publish_records_background()
+            </field>
+        </record>
+
+        <record id="server_action_publish_syscom_products_marked" model="ir.actions.server">
+            <field name="name">Publicar marcados en lote</field>
+            <field name="model_id" ref="model_sync_syscom_product"/>
+            <field name="binding_model_id" ref="model_sync_syscom_product"/>
+            <field name="binding_type">action</field>
+            <field name="state">code</field>
+            <field name="code">
+                action = env["sync.syscom.product"].action_start_publish_marked_background()
             </field>
         </record>
 
@@ -40,12 +51,19 @@
                         <button
                             name="%(server_action_publish_syscom_products)d"
                             type="action"
-                            string="Publicar productos seleccionados"
+                            string="Publicar selección vista"
                             class="btn-primary"
                             groups="sync_syscom.group_sync_syscom_manager"
                         />
+                        <button
+                            name="%(server_action_publish_syscom_products_marked)d"
+                            type="action"
+                            string="Publicar marcados en lote"
+                            class="btn-secondary"
+                            groups="sync_syscom.group_sync_syscom_manager"
+                        />
                     </header>
-                    <field name="selected"/>
+                    <field name="selected" string="Lote"/>
                     <field name="name"/>
                     <field name="model"/>
                     <field name="brand_id"/>
@@ -69,7 +87,7 @@
                 <form string="Modelo SYSCOM">
                     <sheet>
                         <group>
-                            <field name="selected"/>
+                            <field name="selected" string="Lote"/>
                             <field name="name"/>
                             <field name="model"/>
                             <field name="syscom_id"/>
