@@ -15,6 +15,11 @@ class ProductTemplate(models.Model):
         help="ID numérico de SYSCOM usado para consultar detalle/stock/precios (ej. 235038).",
         index=True,
     )
+    brand_id = fields.Many2one(
+        "sync.syscom.brand",
+        string="Marca",
+        help="Marca SYSCOM asociada al producto.",
+    )
     syscom_stock_new = fields.Integer(
         string="Stock SYSCOM (nuevo)",
         help="Existencia 'nuevo' devuelta por SYSCOM (solo informativo para ecommerce).",

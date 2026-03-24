@@ -297,6 +297,7 @@ class SyscomProduct(models.Model):
             }
 
         vals = {
+            "brand_id": staging_product.brand_id.id if staging_product and staging_product.brand_id else False,
             "syscom_warranty": extended["warranty_text"] or False,
             "syscom_height_cm": extended["height_value"] or False,
             "syscom_length_cm": extended["length_value"] or False,

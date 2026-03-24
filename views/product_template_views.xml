@@ -11,6 +11,7 @@
                         <group>
                             <field name="syscom_is_product" readonly="1"/>
                             <field name="syscom_product_id" readonly="1"/>
+                            <field name="brand_id"/>
                             <field name="syscom_warranty"/>
                             <field name="weight"/>
                             <field name="syscom_height_cm"/>
