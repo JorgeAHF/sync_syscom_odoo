@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+        <record id="view_sync_syscom_dropship_job_tree" model="ir.ui.view">
+            <field name="name">sync.syscom.dropship.job.tree</field>
+            <field name="model">sync.syscom.dropship.job</field>
+            <field name="arch" type="xml">
+                <list string="Trabajos dropshipping SYSCOM">
+                    <field name="name"/>
+                    <field name="state"/>
+                    <field name="processed_templates"/>
+                    <field name="total_templates"/>
+                    <field name="supplier_created"/>
+                    <field name="supplier_updated"/>
+                    <field name="routes_added"/>
+                    <field name="purchase_enabled"/>
+                    <field name="skipped_templates"/>
+                    <field name="started_at"/>
+                    <field name="finished_at"/>
+                </list>
+            </field>
+        </record>
+
+        <record id="view_sync_syscom_dropship_job_form" model="ir.ui.view">
+            <field name="name">sync.syscom.dropship.job.form</field>
+            <field name="model">sync.syscom.dropship.job</field>
+            <field name="arch" type="xml">
+                <form string="Trabajo dropshipping SYSCOM">
+                    <sheet>
+                        <group>
+                            <field name="name"/>
+                            <field name="state"/>
+                            <field name="started_at"/>
+                            <field name="finished_at"/>
+                        </group>
+                        <group string="Progreso">
+                            <field name="template_offset"/>
+                            <field name="processed_templates"/>
+                            <field name="total_templates"/>
+                            <field name="skipped_templates"/>
+                        </group>
+                        <group string="Cambios aplicados">
+                            <field name="supplier_created"/>
+                            <field name="supplier_updated"/>
+                            <field name="routes_added"/>
+                            <field name="purchase_enabled"/>
+                        </group>
+                        <group string="Errores">
+                            <field name="last_error"/>
+                        </group>
+                    </sheet>
+                </form>
+            </field>
+        </record>
+
+        <record id="view_sync_syscom_dropship_job_search" model="ir.ui.view">
+            <field name="name">sync.syscom.dropship.job.search</field>
+            <field name="model">sync.syscom.dropship.job</field>
+            <field name="arch" type="xml">
+                <search string="Buscar trabajos dropshipping SYSCOM">
+                    <field name="name"/>
+                    <filter name="pending" string="Pendientes" domain="[('state', 'in', ['pending', 'running'])]"/>
+                    <filter name="done" string="Terminados" domain="[('state', '=', 'done')]"/>
+                    <filter name="error" string="Con error" domain="[('state', '=', 'error')]"/>
+                </search>
+            </field>
+        </record>
+
+        <record id="action_sync_syscom_dropship_job" model="ir.actions.act_window">
+            <field name="name">Trabajos dropshipping SYSCOM</field>
+            <field name="res_model">sync.syscom.dropship.job</field>
+            <field name="view_mode">list,form</field>
+        </record>
+    </data>
+</odoo>

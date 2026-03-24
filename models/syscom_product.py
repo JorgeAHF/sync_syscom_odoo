@@ -247,6 +247,8 @@ class SyscomProduct(models.Model):
         if template._fields.get("syscom_cost_margin_pct"):
             vals_cost["syscom_cost_margin_pct"] = cost_pct
         template.sudo().write(vals_cost)
+        if getattr(template, "syscom_is_product", False):
+            self._ensure_syscom_procurement_setup(template, vendor_price=cost)
 
     def _recompute_syscom_template_cost(self, template, staging_product=None, params=None):
         """Recalculate standard_price for one SYSCOM template from local staging prices."""
@@ -387,31 +389,119 @@ class SyscomProduct(models.Model):
         if vals:
             template.sudo().write(vals)
 
-    def _ensure_syscom_vendor_on_template(self, template):
-        """Ensure SYSCOM vendor exists in supplierinfo for dropship procurement."""
-        vendor = self.env.ref("sync_syscom.res_partner_syscom_vendor", raise_if_not_found=False)
-        if not vendor or not template:
-            return
+    def _get_syscom_vendor_partner(self):
+        return self.env.ref("sync_syscom.res_partner_syscom_vendor", raise_if_not_found=False)
+
+    def _get_syscom_dropship_route(self):
+        candidate_xmlids = [
+            "stock_dropshipping.route_drop_shipping",
+            "purchase_stock.route_drop_shipping",
+            "stock.route_warehouse0_dropship",
+            "stock.route_warehouse0_drop_shipping",
+        ]
+        for xmlid in candidate_xmlids:
+            route = self.env.ref(xmlid, raise_if_not_found=False)
+            if route:
+                return route
+
+        Route = self.env["stock.route"].sudo()
+        for pattern in ("Triang", "Drop Ship", "Dropship", "DropShipping"):
+            route = Route.search([("name", "ilike", pattern)], limit=1)
+            if route:
+                return route
+        return Route.browse()
+
+    def _ensure_syscom_vendor_on_template(self, template, vendor_price=None):
+        """Ensure/update SYSCOM vendor supplierinfo for dropship procurement."""
+        result = {"supplier_created": False, "supplier_updated": False}
+        template = template.sudo()
+        if not template or not getattr(template, "syscom_is_product", False):
+            return result
+
+        vendor = self._get_syscom_vendor_partner()
+        if not vendor:
+            return result
+
         SupplierInfo = self.env["product.supplierinfo"].sudo()
         partner_field = "partner_id" if "partner_id" in SupplierInfo._fields else "name"
         existing = SupplierInfo.search([
             ("product_tmpl_id", "=", template.id),
             (partner_field, "=", vendor.id),
         ], limit=1)
-        if existing:
-            return
-        vals = {
-            "product_tmpl_id": template.id,
-            partner_field: vendor.id,
-            "min_qty": 1.0,
-        }
+        mxn = self.env.ref("base.MXN", raise_if_not_found=False)
+        vendor_price = template.standard_price if vendor_price is None else self._to_float(vendor_price)
+
+        vals = {}
+        if "min_qty" in SupplierInfo._fields:
+            vals["min_qty"] = 1.0
         if "delay" in SupplierInfo._fields:
             vals["delay"] = 1
-        if "currency_id" in SupplierInfo._fields:
-            mxn = self.env.ref("base.MXN", raise_if_not_found=False)
-            if mxn:
-                vals["currency_id"] = mxn.id
+        if "currency_id" in SupplierInfo._fields and mxn:
+            vals["currency_id"] = mxn.id
+        if "price" in SupplierInfo._fields:
+            vals["price"] = vendor_price
+
+        if existing:
+            update_vals = {}
+            if "min_qty" in SupplierInfo._fields and existing.min_qty != 1.0:
+                update_vals["min_qty"] = 1.0
+            if "delay" in SupplierInfo._fields and existing.delay != 1:
+                update_vals["delay"] = 1
+            if "currency_id" in SupplierInfo._fields and mxn and existing.currency_id != mxn:
+                update_vals["currency_id"] = mxn.id
+            if "price" in SupplierInfo._fields and abs((existing.price or 0.0) - vendor_price) > 0.000001:
+                update_vals["price"] = vendor_price
+            if update_vals:
+                existing.write(update_vals)
+                result["supplier_updated"] = True
+            return result
+
+        vals.update({
+            "product_tmpl_id": template.id,
+            partner_field: vendor.id,
+        })
         SupplierInfo.create(vals)
+        result["supplier_created"] = True
+        return result
+
+    def _ensure_syscom_dropship_route(self, template):
+        result = {"route_found": False, "route_added": False, "purchase_enabled": False}
+        template = template.sudo()
+        if not template or not getattr(template, "syscom_is_product", False):
+            return result
+
+        template_vals = {}
+        if "purchase_ok" in template._fields and not template.purchase_ok:
+            template_vals["purchase_ok"] = True
+        if template_vals:
+            template.write(template_vals)
+            result["purchase_enabled"] = True
+
+        route = self._get_syscom_dropship_route()
+        if not route:
+            return result
+        result["route_found"] = True
+
+        if "route_ids" in template._fields and route.id not in template.route_ids.ids:
+            template.write({"route_ids": [(4, route.id)]})
+            result["route_added"] = True
+        return result
+
+    def _ensure_syscom_procurement_setup(self, template, vendor_price=None):
+        result = {
+            "supplier_created": False,
+            "supplier_updated": False,
+            "route_found": False,
+            "route_added": False,
+            "purchase_enabled": False,
+        }
+        template = template.sudo()
+        if not template or not getattr(template, "syscom_is_product", False):
+            return result
+
+        result.update(self._ensure_syscom_vendor_on_template(template, vendor_price=vendor_price))
+        result.update(self._ensure_syscom_dropship_route(template))
+        return result
 
     def _ensure_template_published_on_website(self, template):
         """Publish product on website (eCommerce) if the field exists.
@@ -893,7 +983,7 @@ class SyscomProduct(models.Model):
 
         self._apply_extended_values_to_template(template, detail, staging_product=product)
 
-        self._ensure_syscom_vendor_on_template(template)
+        self._ensure_syscom_procurement_setup(template)
 
         deepest_cat = self._get_deepest_category(cat_ids)
         if deepest_cat:
@@ -1288,7 +1378,7 @@ class SyscomProduct(models.Model):
                 self._apply_extended_values_to_template(template, detail, staging_product=product)
 
                 # Ensure vendor is set for dropship procurement
-                self._ensure_syscom_vendor_on_template(template)
+                self._ensure_syscom_procurement_setup(template)
 
                 # Categoría Odoo (más profunda)
                 deepest_cat = self._get_deepest_category(cat_ids)
@@ -1439,6 +1529,19 @@ class SyscomProduct(models.Model):
             "params": {
                 "title": "Sync SYSCOM",
                 "message": "Trabajo de datos extendidos programado: %s." % job.display_name,
+                "type": "success",
+                "sticky": False,
+            },
+        }
+
+    def action_start_configure_syscom_dropshipping(self):
+        job = self.env["sync.syscom.dropship.job"].create_configure_all_job()
+        return {
+            "type": "ir.actions.client",
+            "tag": "display_notification",
+            "params": {
+                "title": "Sync SYSCOM",
+                "message": "Trabajo de dropshipping SYSCOM programado: %s." % job.display_name,
                 "type": "success",
                 "sticky": False,
             },

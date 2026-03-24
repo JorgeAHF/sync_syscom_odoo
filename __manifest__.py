@@ -19,6 +19,7 @@
         "views/publish_job_views.xml",
         "views/sync_job_views.xml",
         "views/cost_job_views.xml",
+        "views/dropship_job_views.xml",
         "views/product_data_job_views.xml",
         "views/sync_log_views.xml",
         "views/menu.xml",

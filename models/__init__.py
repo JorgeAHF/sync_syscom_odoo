@@ -5,6 +5,7 @@ from . import sync_log
 from . import publish_job
 from . import sync_job
 from . import cost_job
+from . import dropship_job
 from . import product_data_job
 from . import syscom_category
 from . import syscom_brand

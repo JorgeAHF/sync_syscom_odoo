@@ -35,6 +35,17 @@
             </field>
         </record>
 
+        <record id="server_action_configure_syscom_dropshipping" model="ir.actions.server">
+            <field name="name">Configurar dropshipping SYSCOM</field>
+            <field name="model_id" ref="model_sync_syscom_product"/>
+            <field name="binding_model_id" ref="model_sync_syscom_product"/>
+            <field name="binding_type">action</field>
+            <field name="state">code</field>
+            <field name="code">
+                action = env["sync.syscom.product"].action_start_configure_syscom_dropshipping()
+            </field>
+        </record>
+
         <record id="server_action_sync_extended_product_data" model="ir.actions.server">
             <field name="name">Actualizar datos extendidos SYSCOM</field>
             <field name="model_id" ref="model_sync_syscom_product"/>
@@ -56,6 +67,13 @@
                             name="%(server_action_recompute_syscom_costs)d"
                             type="action"
                             string="Recalcular costos SYSCOM"
+                            class="btn-secondary"
+                            groups="sync_syscom.group_sync_syscom_manager"
+                        />
+                        <button
+                            name="%(server_action_configure_syscom_dropshipping)d"
+                            type="action"
+                            string="Configurar dropshipping"
                             class="btn-secondary"
                             groups="sync_syscom.group_sync_syscom_manager"
                         />
