@@ -1,0 +1,250 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+        <record id="server_action_sync_brands_selected" model="ir.actions.server">
+            <field name="name">Sincronizar marcas selección vista</field>
+            <field name="model_id" ref="model_sync_syscom_category"/>
+            <field name="binding_model_id" ref="model_sync_syscom_category"/>
+            <field name="binding_type">action</field>
+            <field name="state">code</field>
+            <field name="code">
+                action = records.action_sync_brands_for_categories()
+            </field>
+        </record>
+
+        <record id="server_action_sync_brands_marked" model="ir.actions.server">
+            <field name="name">Sincronizar marcas marcadas en lote</field>
+            <field name="model_id" ref="model_sync_syscom_category"/>
+            <field name="binding_model_id" ref="model_sync_syscom_category"/>
+            <field name="binding_type">action</field>
+            <field name="state">code</field>
+            <field name="code">
+                action = env["sync.syscom.category"].action_sync_brands_marked()
+            </field>
+        </record>
+
+        <record id="server_action_mark_categories_selected" model="ir.actions.server">
+            <field name="name">Marcar categorías seleccionadas</field>
+            <field name="model_id" ref="model_sync_syscom_category"/>
+            <field name="binding_model_id" ref="model_sync_syscom_category"/>
+            <field name="binding_type">action</field>
+            <field name="state">code</field>
+            <field name="code">
+records.write({"selected": True})
+            </field>
+        </record>
+
+        <record id="server_action_publish_categories_with_children" model="ir.actions.server">
+            <field name="name">Publicar selección vista (con subcategorías)</field>
+            <field name="model_id" ref="model_sync_syscom_category"/>
+            <field name="binding_model_id" ref="model_sync_syscom_category"/>
+            <field name="binding_type">action</field>
+            <field name="state">code</field>
+            <field name="code">
+action = records.action_publish_scope_categories(include_children=True)
+            </field>
+        </record>
+
+        <record id="server_action_publish_categories_marked_with_children" model="ir.actions.server">
+            <field name="name">Publicar marcadas en lote (con subcategorías)</field>
+            <field name="model_id" ref="model_sync_syscom_category"/>
+            <field name="binding_model_id" ref="model_sync_syscom_category"/>
+            <field name="binding_type">action</field>
+            <field name="state">code</field>
+            <field name="code">
+action = env["sync.syscom.category"].action_publish_marked_categories(include_children=True)
+            </field>
+        </record>
+
+        <record id="server_action_publish_categories_only" model="ir.actions.server">
+            <field name="name">Publicar selección vista (solo categoría)</field>
+            <field name="model_id" ref="model_sync_syscom_category"/>
+            <field name="binding_model_id" ref="model_sync_syscom_category"/>
+            <field name="binding_type">action</field>
+            <field name="state">code</field>
+            <field name="code">
+action = records.action_publish_scope_categories(include_children=False)
+            </field>
+        </record>
+
+        <record id="server_action_publish_categories_marked_only" model="ir.actions.server">
+            <field name="name">Publicar marcadas en lote (solo categoría)</field>
+            <field name="model_id" ref="model_sync_syscom_category"/>
+            <field name="binding_model_id" ref="model_sync_syscom_category"/>
+            <field name="binding_type">action</field>
+            <field name="state">code</field>
+            <field name="code">
+action = env["sync.syscom.category"].action_publish_marked_categories(include_children=False)
+            </field>
+        </record>
+
+        <record id="view_sync_syscom_category_tree" model="ir.ui.view">
+            <field name="name">sync.syscom.category.list</field>
+            <field name="model">sync.syscom.category</field>
+            <field name="arch" type="xml">
+                <list string="Categorías SYSCOM">
+                    <header>
+                        <button
+                            name="%(server_action_sync_syscom_category)d"
+                            type="action"
+                            string="Sincronizar desde SYSCOM"
+                            class="btn-secondary"
+                            groups="sync_syscom.group_sync_syscom_manager"
+                        />
+                        <button
+                            name="%(server_action_sync_cat_brand)d"
+                            type="action"
+                            string="Sincronizar categorías + marcas (completo)"
+                            class="btn-primary"
+                            groups="sync_syscom.group_sync_syscom_manager"
+                        />
+                        <button
+                            name="%(server_action_mark_categories_selected)d"
+                            type="action"
+                            string="Marcar lote"
+                            class="btn-secondary"
+                            groups="sync_syscom.group_sync_syscom_manager"
+                        />
+                        <button
+                            name="%(server_action_sync_brands_selected)d"
+                            type="action"
+                            string="Sync marcas selección vista"
+                            class="btn-secondary"
+                            groups="sync_syscom.group_sync_syscom_manager"
+                        />
+                        <button
+                            name="%(server_action_sync_brands_marked)d"
+                            type="action"
+                            string="Sync marcas marcadas lote"
+                            class="btn-secondary"
+                            groups="sync_syscom.group_sync_syscom_manager"
+                        />
+                        <button
+                            name="%(server_action_publish_categories_with_children)d"
+                            type="action"
+                            string="Publicar selección vista"
+                            class="btn-primary"
+                            groups="sync_syscom.group_sync_syscom_manager"
+                        />
+                        <button
+                            name="%(server_action_publish_categories_marked_with_children)d"
+                            type="action"
+                            string="Publicar marcadas lote"
+                            class="btn-secondary"
+                            groups="sync_syscom.group_sync_syscom_manager"
+                        />
+                    </header>
+                    <field name="level1_name" string="Nivel 1" readonly="1"/>
+                    <field name="level2_name" string="Nivel 2" readonly="1"/>
+                    <field name="level3_name" string="Nivel 3" readonly="1"/>
+                    <field name="selected" string="Lote"/>
+                    <field name="model_count" string="Modelos" readonly="1"/>
+                    <field name="brand_ids_tree" string="Marcas heredadas" widget="many2many_tags" context="{'sync_syscom_show_id': True}"/>
+                    <field name="model_names"/>
+                </list>
+            </field>
+        </record>
+
+        <record id="view_sync_syscom_category_form" model="ir.ui.view">
+            <field name="name">sync.syscom.category.form</field>
+            <field name="model">sync.syscom.category</field>
+            <field name="arch" type="xml">
+                <form string="Categoría SYSCOM">
+                    <header>
+                        <button
+                            name="%(server_action_publish_categories_with_children)d"
+                            type="action"
+                            string="Publicar selección vista"
+                            class="btn-primary"
+                            groups="sync_syscom.group_sync_syscom_manager"
+                        />
+                        <button
+                            name="%(server_action_publish_categories_only)d"
+                            type="action"
+                            string="Publicar selección vista (solo)"
+                            class="btn-secondary"
+                            groups="sync_syscom.group_sync_syscom_manager"
+                        />
+                        <button
+                            name="%(server_action_publish_categories_marked_with_children)d"
+                            type="action"
+                            string="Publicar marcadas lote"
+                            class="btn-secondary"
+                            groups="sync_syscom.group_sync_syscom_manager"
+                        />
+                        <button
+                            name="%(server_action_publish_categories_marked_only)d"
+                            type="action"
+                            string="Publicar marcadas lote (solo)"
+                            class="btn-secondary"
+                            groups="sync_syscom.group_sync_syscom_manager"
+                        />
+                    </header>
+                    <sheet>
+                        <group>
+                            <field name="name"/>
+                            <field name="syscom_id"/>
+                            <field name="level"/>
+                            <field name="syscom_sequence"/>
+                            <field name="parent_id"/>
+                            <field name="active"/>
+                        </group>
+                        <group string="Vínculos Odoo">
+                            <field name="product_category_id" readonly="1"/>
+                            <field name="public_category_id" readonly="1"/>
+                        </group>
+                        <group string="Marcas">
+                            <field name="brand_ids" string="Marcas directas" widget="many2many_tags" context="{'sync_syscom_show_id': True}"/>
+                            <field name="brand_ids_tree" string="Marcas heredadas" widget="many2many_tags" context="{'sync_syscom_show_id': True}" readonly="1"/>
+                        </group>
+                        <notebook>
+                            <page string="Subcategorías">
+                                <field name="child_ids">
+                                    <list>
+                                        <field name="name"/>
+                                        <field name="syscom_id"/>
+                                        <field name="level"/>
+                                        <field name="active"/>
+                                    </list>
+                                </field>
+                            </page>
+                        </notebook>
+                    </sheet>
+                </form>
+            </field>
+        </record>
+
+        <record id="action_sync_syscom_category" model="ir.actions.act_window">
+            <field name="name">Categorías SYSCOM</field>
+            <field name="res_model">sync.syscom.category</field>
+            <field name="view_id" ref="view_sync_syscom_category_tree"/>
+            <field name="view_mode">list,form</field>
+            <field name="help" type="html">
+                <p class="o_view_nocontent_smiling_face">Sincroniza categorías desde SYSCOM.</p>
+            </field>
+        </record>
+
+        <!-- Acción en menú "Acción" del formulario/lista -->
+        <record id="server_action_sync_syscom_category" model="ir.actions.server">
+            <field name="name">Sincronizar desde SYSCOM</field>
+            <field name="model_id" ref="model_sync_syscom_category"/>
+            <field name="binding_model_id" ref="model_sync_syscom_category"/>
+            <field name="binding_type">action</field>
+            <field name="state">code</field>
+            <field name="code">
+action = env["sync.syscom.category"].action_start_category_sync()
+            </field>
+        </record>
+
+        <record id="server_action_sync_cat_brand" model="ir.actions.server">
+            <field name="name">Sincronizar categorías y marcas</field>
+            <field name="model_id" ref="model_sync_syscom_category"/>
+            <field name="binding_model_id" ref="model_sync_syscom_category"/>
+            <field name="binding_type">action</field>
+            <field name="state">code</field>
+            <field name="code">
+action = env["sync.syscom.category"].action_start_sync_pipeline()
+            </field>
+        </record>
+    </data>
+</odoo>

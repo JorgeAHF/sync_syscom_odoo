@@ -1,0 +1,168 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+        <!-- Settings action (used both inside the SyncSyscom app and inside General Settings sidebar) -->
+        <record id="action_sync_syscom_settings" model="ir.actions.act_window">
+            <field name="name">Configuración SyncSyscom</field>
+            <field name="res_model">res.config.settings</field>
+            <field name="view_mode">form</field>
+            <!-- In Odoo 19, valid targets are current/new/fullscreen/main -->
+            <field name="target">current</field>
+            <field name="context">{'module': 'sync_syscom'}</field>
+        </record>
+
+        <record id="server_action_sync_cat_brand_models" model="ir.actions.server">
+            <field name="name">Sincronizar categorías, marcas y modelos</field>
+            <field name="model_id" ref="base.model_res_users"/>
+            <field name="binding_model_id" ref="base.model_res_users"/>
+            <field name="binding_type">action</field>
+            <field name="state">code</field>
+            <field name="code">
+action = env["sync.syscom.category"].action_start_sync_pipeline()
+            </field>
+        </record>
+
+        <menuitem id="menu_sync_syscom_root" name="SyncSyscom" groups="sync_syscom.group_sync_syscom_manager"/>
+        <menuitem
+            id="menu_sync_syscom_sync"
+            name="Sincronizar"
+            parent="menu_sync_syscom_root"
+            groups="sync_syscom.group_sync_syscom_manager"
+        />
+        <menuitem
+            id="menu_sync_syscom_catalogs"
+            name="Catálogos"
+            parent="menu_sync_syscom_root"
+            groups="sync_syscom.group_sync_syscom_manager"
+        />
+        <menuitem
+            id="menu_sync_syscom_sync_all"
+            name="Categorías/Marcas/Modelos"
+            parent="menu_sync_syscom_sync"
+            action="server_action_sync_cat_brand_models"
+            groups="sync_syscom.group_sync_syscom_manager"
+        />
+        <menuitem
+            id="menu_sync_syscom_sync_jobs"
+            name="Trabajos sync catálogo"
+            parent="menu_sync_syscom_sync"
+            action="action_sync_syscom_sync_job"
+            groups="sync_syscom.group_sync_syscom_manager"
+        />
+        <menuitem
+            id="menu_sync_syscom_publish_jobs"
+            name="Ver trabajos publicación"
+            parent="menu_sync_syscom_sync"
+            action="action_sync_syscom_publish_jobs"
+            groups="sync_syscom.group_sync_syscom_manager"
+        />
+        <menuitem
+            id="menu_sync_syscom_cost_jobs"
+            name="Trabajos costos"
+            parent="menu_sync_syscom_sync"
+            action="action_sync_syscom_cost_job"
+            groups="sync_syscom.group_sync_syscom_manager"
+        />
+        <menuitem
+            id="menu_sync_syscom_dropship_jobs"
+            name="Trabajos dropshipping"
+            parent="menu_sync_syscom_sync"
+            action="action_sync_syscom_dropship_job"
+            groups="sync_syscom.group_sync_syscom_manager"
+        />
+        <menuitem
+            id="menu_sync_syscom_product_data_jobs"
+            name="Trabajos datos extendidos"
+            parent="menu_sync_syscom_sync"
+            action="action_sync_syscom_product_data_job"
+            groups="sync_syscom.group_sync_syscom_manager"
+        />
+        <menuitem
+            id="menu_sync_syscom_category_publish_jobs"
+            name="Trabajos categorías"
+            parent="menu_sync_syscom_sync"
+            action="action_sync_syscom_publish_job"
+            groups="sync_syscom.group_sync_syscom_manager"
+        />
+        <menuitem
+            id="menu_sync_syscom_sync_categories"
+            name="Sync Categorías"
+            parent="menu_sync_syscom_sync"
+            action="server_action_sync_syscom_category"
+            groups="sync_syscom.group_sync_syscom_manager"
+            active="False"
+        />
+        <menuitem
+            id="menu_sync_syscom_sync_brands"
+            name="Sync Marcas"
+            parent="menu_sync_syscom_sync"
+            action="server_action_sync_syscom_brand"
+            groups="sync_syscom.group_sync_syscom_manager"
+            active="False"
+        />
+        <menuitem
+            id="menu_sync_syscom_sync_models_selected"
+            name="Sync Modelos Sel."
+            parent="menu_sync_syscom_sync"
+            action="server_action_sync_syscom_models_selected"
+            groups="sync_syscom.group_sync_syscom_manager"
+            active="False"
+        />
+        <menuitem
+            id="menu_sync_syscom_publish_selected"
+            name="Publicar seleccionados"
+            parent="menu_sync_syscom_sync"
+            action="server_action_publish_syscom_products"
+            groups="sync_syscom.group_sync_syscom_manager"
+            active="False"
+        />
+        <menuitem
+            id="menu_sync_syscom_categories"
+            name="Categorías"
+            parent="menu_sync_syscom_catalogs"
+            action="action_sync_syscom_category"
+            groups="sync_syscom.group_sync_syscom_manager"
+        />
+        <menuitem
+            id="menu_sync_syscom_brands"
+            name="Marcas"
+            parent="menu_sync_syscom_catalogs"
+            action="action_sync_syscom_brand"
+            groups="sync_syscom.group_sync_syscom_manager"
+        />
+        <menuitem
+            id="menu_sync_syscom_products"
+            name="Modelos"
+            parent="menu_sync_syscom_catalogs"
+            action="action_sync_syscom_product"
+            groups="sync_syscom.group_sync_syscom_manager"
+        />
+        <menuitem
+            id="menu_sync_syscom_logs"
+            name="Logs"
+            parent="menu_sync_syscom_root"
+            action="action_sync_syscom_log"
+            groups="sync_syscom.group_sync_syscom_manager"
+        />
+
+        <!-- Top bar menu entry inside the SyncSyscom app -->
+        <menuitem
+            id="menu_sync_syscom_settings"
+            name="Configuración"
+            parent="menu_sync_syscom_root"
+            action="action_sync_syscom_settings"
+            sequence="90"
+            groups="sync_syscom.group_sync_syscom_manager"
+        />
+
+        <!-- Left sidebar entry inside Odoo Settings (Ajustes) -->
+        <menuitem
+            id="menu_sync_syscom_settings_in_settings"
+            name="SyncSyscom"
+            parent="base.menu_config"
+            action="action_sync_syscom_settings"
+            sequence="90"
+            groups="sync_syscom.group_sync_syscom_manager"
+        />
+    </data>
+</odoo>

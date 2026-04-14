@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data noupdate="0">
+        <record id="pricelist_syscom_list" model="product.pricelist">
+            <field name="name">SYSCOM Lista</field>
+            <field name="currency_id" ref="base.MXN"/>
+        </record>
+
+        <record id="pricelist_syscom_special" model="product.pricelist">
+            <field name="name">SYSCOM Especial</field>
+            <field name="currency_id" ref="base.MXN"/>
+        </record>
+
+        <record id="pricelist_syscom_discount" model="product.pricelist">
+            <field name="name">SYSCOM Descuento</field>
+            <field name="currency_id" ref="base.MXN"/>
+        </record>
+    </data>
+</odoo>

@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+        <record id="res_config_settings_view_form_sync_syscom" model="ir.ui.view">
+            <field name="name">res.config.settings.view.form.sync_syscom</field>
+            <field name="model">res.config.settings</field>
+            <field name="inherit_id" ref="base.res_config_settings_view_form"/>
+            <field name="arch" type="xml">
+                <xpath expr="//form" position="inside">
+                    <app
+                        string="SyncSyscom"
+                        data-string="SyncSyscom"
+                        name="sync_syscom"
+                        logo="/sync_syscom/static/description/icon.png"
+                        groups="sync_syscom.group_sync_syscom_manager"
+                    >
+                        <block title="Conexion y catalogo" name="sync_syscom_connection_block">
+                            <setting
+                                string="Credenciales y parametros de SYSCOM"
+                                help="Configura la conexion, listas de precios y reglas de sincronizacion con SYSCOM."
+                                id="sync_syscom_connection_setting"
+                            >
+                                <div class="content-group">
+                                    <div class="row mt16">
+                                        <label class="col-lg-4 o_light_label" for="syscom_api_token"/>
+                                        <div class="col-lg-8">
+                                            <field name="syscom_api_token" widget="password"/>
+                                        </div>
+                                    </div>
+                                    <div class="row mt16">
+                                        <label class="col-lg-4 o_light_label" for="syscom_base_url"/>
+                                        <div class="col-lg-8">
+                                            <field name="syscom_base_url"/>
+                                        </div>
+                                    </div>
+                                    <div class="row mt16">
+                                        <label class="col-lg-4 o_light_label" for="syscom_timeout"/>
+                                        <div class="col-lg-8">
+                                            <field name="syscom_timeout"/>
+                                        </div>
+                                    </div>
+                                    <div class="row mt16">
+                                        <label class="col-lg-4 o_light_label" for="syscom_price_currency"/>
+                                        <div class="col-lg-8">
+                                            <field name="syscom_price_currency" class="oe_inline"/>
+                                        </div>
+                                    </div>
+                                    <div class="row mt16">
+                                        <label class="col-lg-4 o_light_label" for="syscom_pricelist_list"/>
+                                        <div class="col-lg-8">
+                                            <field name="syscom_pricelist_list" options="{'no_create': True}"/>
+                                        </div>
+                                    </div>
+                                    <div class="row mt16">
+                                        <label class="col-lg-4 o_light_label" for="syscom_pricelist_special"/>
+                                        <div class="col-lg-8">
+                                            <field name="syscom_pricelist_special" options="{'no_create': True}"/>
+                                        </div>
+                                    </div>
+                                    <div class="row mt16">
+                                        <label class="col-lg-4 o_light_label" for="syscom_pricelist_discount"/>
+                                        <div class="col-lg-8">
+                                            <field name="syscom_pricelist_discount" options="{'no_create': True}"/>
+                                        </div>
+                                    </div>
+                                    <div class="row mt16">
+                                        <label class="col-lg-4 o_light_label" for="syscom_min_stock"/>
+                                        <div class="col-lg-8">
+                                            <field name="syscom_min_stock" class="oe_inline"/>
+                                            <span class="text-muted ms-2">Cantidad minima en SYSCOM para publicar productos (&gt;=1).</span>
+                                        </div>
+                                    </div>
+                                    <div class="row mt16">
+                                        <label class="col-lg-4 o_light_label" for="syscom_cost_discount_pct"/>
+                                        <div class="col-lg-8">
+                                            <field name="syscom_cost_discount_pct" class="oe_inline"/>
+                                            <span class="text-muted ms-2">% sobre precio con descuento para calcular costo.</span>
+                                        </div>
+                                    </div>
+                                    <div class="row mt16">
+                                        <label class="col-lg-4 o_light_label" for="syscom_stock_refresh_enabled"/>
+                                        <div class="col-lg-8">
+                                            <field name="syscom_stock_refresh_enabled" class="oe_inline"/>
+                                            <span class="text-muted ms-2">Refresca stock, precios y costo en background.</span>
+                                        </div>
+                                    </div>
+                                    <div class="row mt16" invisible="not syscom_stock_refresh_enabled">
+                                        <label class="col-lg-4 o_light_label" for="syscom_stock_refresh_hours"/>
+                                        <div class="col-lg-8">
+                                            <field name="syscom_stock_refresh_hours" class="oe_inline"/>
+                                            <span class="text-muted ms-2">Cada cuantas horas como minimo se actualiza el stock.</span>
+                                        </div>
+                                    </div>
+                                    <div class="row mt16">
+                                        <label class="col-lg-4 o_light_label" for="syscom_publish_include_children"/>
+                                        <div class="col-lg-8">
+                                            <field name="syscom_publish_include_children" class="oe_inline"/>
+                                            <span class="text-muted ms-2">Incluye automaticamente subcategorias al publicar por categoria.</span>
+                                        </div>
+                                    </div>
+                                    <div class="mt16">
+                                        <button
+                                            type="object"
+                                            name="action_syscom_test_connection"
+                                            string="Probar conexion"
+                                            class="btn btn-primary"
+                                        />
+                                    </div>
+                                </div>
+                            </setting>
+                        </block>
+                    </app>
+                </xpath>
+            </field>
+        </record>
+    </data>
+</odoo>

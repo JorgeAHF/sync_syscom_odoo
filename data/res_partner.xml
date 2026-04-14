@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data noupdate="1">
+        <!-- Default vendor used for SYSCOM dropship purchases -->
+        <record id="res_partner_syscom_vendor" model="res.partner">
+            <field name="name">SYSCOM</field>
+            <field name="is_company">True</field>
+            <field name="supplier_rank">1</field>
+            <field name="ref">SYSCOM</field>
+            <field name="syscom_is_vendor">True</field>
+        </record>
+    </data>
+</odoo>
+

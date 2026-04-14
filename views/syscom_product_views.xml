@@ -1,0 +1,229 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+        <!-- Server action declared before being referenced -->
+        <record id="server_action_publish_syscom_products" model="ir.actions.server">
+            <field name="name">Publicar selección vista</field>
+            <field name="model_id" ref="model_sync_syscom_product"/>
+            <field name="binding_model_id" ref="model_sync_syscom_product"/>
+            <field name="binding_type">action</field>
+            <field name="state">code</field>
+            <field name="code">
+                action = records.action_start_publish_records_background()
+            </field>
+        </record>
+
+        <record id="server_action_publish_syscom_products_marked" model="ir.actions.server">
+            <field name="name">Publicar marcados en lote</field>
+            <field name="model_id" ref="model_sync_syscom_product"/>
+            <field name="binding_model_id" ref="model_sync_syscom_product"/>
+            <field name="binding_type">action</field>
+            <field name="state">code</field>
+            <field name="code">
+                action = env["sync.syscom.product"].action_start_publish_marked_background()
+            </field>
+        </record>
+
+        <record id="server_action_recompute_syscom_costs" model="ir.actions.server">
+            <field name="name">Recalcular costos SYSCOM</field>
+            <field name="model_id" ref="model_sync_syscom_product"/>
+            <field name="binding_model_id" ref="model_sync_syscom_product"/>
+            <field name="binding_type">action</field>
+            <field name="state">code</field>
+            <field name="code">
+                action = env["sync.syscom.product"].action_start_recompute_syscom_costs()
+            </field>
+        </record>
+
+        <record id="server_action_configure_syscom_dropshipping" model="ir.actions.server">
+            <field name="name">Configurar dropshipping SYSCOM</field>
+            <field name="model_id" ref="model_sync_syscom_product"/>
+            <field name="binding_model_id" ref="model_sync_syscom_product"/>
+            <field name="binding_type">action</field>
+            <field name="state">code</field>
+            <field name="code">
+                action = env["sync.syscom.product"].action_start_configure_syscom_dropshipping()
+            </field>
+        </record>
+
+        <record id="server_action_sync_extended_product_data" model="ir.actions.server">
+            <field name="name">Actualizar datos extendidos SYSCOM</field>
+            <field name="model_id" ref="model_sync_syscom_product"/>
+            <field name="binding_model_id" ref="model_sync_syscom_product"/>
+            <field name="binding_type">action</field>
+            <field name="state">code</field>
+            <field name="code">
+                action = env["sync.syscom.product"].action_start_sync_extended_product_data()
+            </field>
+        </record>
+
+        <record id="view_sync_syscom_product_tree" model="ir.ui.view">
+            <field name="name">sync.syscom.product.list</field>
+            <field name="model">sync.syscom.product</field>
+            <field name="arch" type="xml">
+                <list string="Modelos SYSCOM">
+                    <header>
+                        <button
+                            name="%(server_action_recompute_syscom_costs)d"
+                            type="action"
+                            string="Recalcular costos SYSCOM"
+                            class="btn-secondary"
+                            groups="sync_syscom.group_sync_syscom_manager"
+                        />
+                        <button
+                            name="%(server_action_configure_syscom_dropshipping)d"
+                            type="action"
+                            string="Configurar dropshipping"
+                            class="btn-secondary"
+                            groups="sync_syscom.group_sync_syscom_manager"
+                        />
+                        <button
+                            name="%(server_action_sync_extended_product_data)d"
+                            type="action"
+                            string="Actualizar datos extendidos"
+                            class="btn-secondary"
+                            groups="sync_syscom.group_sync_syscom_manager"
+                        />
+                        <button
+                            name="%(server_action_publish_syscom_products)d"
+                            type="action"
+                            string="Publicar selección vista"
+                            class="btn-primary"
+                            groups="sync_syscom.group_sync_syscom_manager"
+                        />
+                        <button
+                            name="%(server_action_publish_syscom_products_marked)d"
+                            type="action"
+                            string="Publicar marcados en lote"
+                            class="btn-secondary"
+                            groups="sync_syscom.group_sync_syscom_manager"
+                        />
+                    </header>
+                    <field name="selected" string="Lote"/>
+                    <field name="name"/>
+                    <field name="model"/>
+                    <field name="brand_id"/>
+                    <field name="category_ids" widget="many2many_tags"/>
+                    <field name="price_list"/>
+                    <field name="price_list_mxn"/>
+                    <field name="price_special"/>
+                    <field name="price_special_mxn"/>
+                    <field name="warranty_text"/>
+                    <field name="weight_value"/>
+                    <field name="height_value"/>
+                    <field name="length_value"/>
+                    <field name="width_value"/>
+                    <field name="synced_at"/>
+                    <field name="publish_state"/>
+                    <field name="sync_error"/>
+                    <field name="active"/>
+                </list>
+            </field>
+        </record>
+
+        <record id="view_sync_syscom_product_form" model="ir.ui.view">
+            <field name="name">sync.syscom.product.form</field>
+            <field name="model">sync.syscom.product</field>
+            <field name="arch" type="xml">
+                <form string="Modelo SYSCOM">
+                    <sheet>
+                        <group>
+                            <field name="selected" string="Lote"/>
+                            <field name="name"/>
+                            <field name="model"/>
+                            <field name="syscom_id"/>
+                            <field name="brand_id"/>
+                            <field name="category_ids" widget="many2many_tags"/>
+                            <field name="active"/>
+                        </group>
+                        <group string="Precios USD">
+                            <field name="price_list"/>
+                            <field name="price_special"/>
+                            <field name="price_discounts"/>
+                            <field name="currency"/>
+                        </group>
+                        <group string="Precios MXN">
+                            <field name="price_list_mxn"/>
+                            <field name="price_special_mxn"/>
+                            <field name="price_discounts_mxn"/>
+                            <field name="exchange_rate"/>
+                            <field name="exchange_rate_date"/>
+                        </group>
+                        <group string="Inventario y SAT">
+                            <field name="total_existencia"/>
+                            <field name="sat_key"/>
+                            <field name="link"/>
+                        </group>
+                        <group string="Datos extendidos">
+                            <field name="warranty_text"/>
+                            <field name="weight_value"/>
+                            <field name="height_value"/>
+                            <field name="length_value"/>
+                            <field name="width_value"/>
+                        </group>
+                        <group string="Medios">
+                            <field name="image_url"/>
+                            <field name="brand_logo_url"/>
+                        </group>
+                        <group string="Descripción">
+                            <field name="description"/>
+                        </group>
+                        <group string="Metadatos">
+                            <field name="synced_at"/>
+                            <field name="sync_error"/>
+                            <field name="publish_state"/>
+                            <field name="publish_started_at"/>
+                            <field name="publish_done_at"/>
+                        </group>
+                        <notebook>
+                            <page string="Existencias">
+                                <field name="existence_json"/>
+                            </page>
+                            <page string="Iconos/Features">
+                                <field name="icons_json"/>
+                                <field name="features_json"/>
+                            </page>
+                            <page string="Imágenes/Recursos">
+                                <field name="images_json"/>
+                                <field name="resources_json"/>
+                            </page>
+                            <page string="Payload">
+                                <field name="payload"/>
+                            </page>
+                        </notebook>
+                    </sheet>
+                </form>
+            </field>
+        </record>
+
+        <record id="action_sync_syscom_product" model="ir.actions.act_window">
+            <field name="name">Modelos SYSCOM</field>
+            <field name="res_model">sync.syscom.product</field>
+            <field name="view_mode">list,form</field>
+        </record>
+
+        <record id="view_sync_syscom_product_search" model="ir.ui.view">
+            <field name="name">sync.syscom.product.search</field>
+            <field name="model">sync.syscom.product</field>
+            <field name="arch" type="xml">
+                <search string="Buscar modelos SYSCOM">
+                    <field name="name"/>
+                    <field name="model"/>
+                    <field name="brand_id"/>
+                    <field name="category_ids"/>
+                    <filter name="publish_pending" string="Pendientes" domain="[('publish_state', 'in', ['pending', 'processing'])]"/>
+                    <filter name="publish_error" string="Con error" domain="[('publish_state', '=', 'error')]"/>
+                    <filter name="publish_done" string="Publicados" domain="[('publish_state', '=', 'done')]"/>
+                </search>
+            </field>
+        </record>
+
+        <record id="action_sync_syscom_publish_jobs" model="ir.actions.act_window">
+            <field name="name">Trabajos de publicación</field>
+            <field name="res_model">sync.syscom.product</field>
+            <field name="view_mode">list,form</field>
+            <field name="domain">[('publish_state', '!=', 'none')]</field>
+            <field name="context">{'search_default_publish_pending': 1}</field>
+        </record>
+    </data>
+</odoo>

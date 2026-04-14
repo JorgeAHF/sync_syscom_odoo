@@ -1,0 +1,220 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+        <!-- Server actions must be declared before being referenced in views -->
+        <record id="server_action_sync_syscom_brand" model="ir.actions.server">
+            <field name="name">Sincronizar desde SYSCOM</field>
+            <field name="model_id" ref="model_sync_syscom_brand"/>
+            <field name="binding_model_id" ref="model_sync_syscom_brand"/>
+            <field name="binding_type">action</field>
+            <field name="state">code</field>
+            <field name="code">
+action = env["sync.syscom.brand"].action_start_brand_sync()
+            </field>
+        </record>
+
+        <record id="server_action_sync_syscom_models_selected" model="ir.actions.server">
+            <field name="name">Sincronizar modelos selección vista</field>
+            <field name="model_id" ref="model_sync_syscom_brand"/>
+            <field name="binding_model_id" ref="model_sync_syscom_brand"/>
+            <field name="binding_type">action</field>
+            <field name="state">code</field>
+            <field name="code">
+                action = records.action_sync_models_for_brands()
+            </field>
+        </record>
+
+        <record id="server_action_sync_syscom_models_marked" model="ir.actions.server">
+            <field name="name">Sincronizar modelos marcados en lote</field>
+            <field name="model_id" ref="model_sync_syscom_brand"/>
+            <field name="binding_model_id" ref="model_sync_syscom_brand"/>
+            <field name="binding_type">action</field>
+            <field name="state">code</field>
+            <field name="code">
+                action = env["sync.syscom.brand"].action_sync_models_marked()
+            </field>
+        </record>
+
+        <record id="server_action_publish_scope_brands" model="ir.actions.server">
+            <field name="name">Publicar eCommerce selección vista</field>
+            <field name="model_id" ref="model_sync_syscom_brand"/>
+            <field name="binding_model_id" ref="model_sync_syscom_brand"/>
+            <field name="binding_type">action</field>
+            <field name="state">code</field>
+            <field name="code">
+action = records.action_publish_scope_brands()
+            </field>
+        </record>
+
+        <record id="server_action_publish_scope_brands_marked" model="ir.actions.server">
+            <field name="name">Publicar eCommerce marcadas en lote</field>
+            <field name="model_id" ref="model_sync_syscom_brand"/>
+            <field name="binding_model_id" ref="model_sync_syscom_brand"/>
+            <field name="binding_type">action</field>
+            <field name="state">code</field>
+            <field name="code">
+action = env["sync.syscom.brand"].action_publish_marked_brands()
+            </field>
+        </record>
+
+        <record id="view_sync_syscom_brand_tree" model="ir.ui.view">
+            <field name="name">sync.syscom.brand.list</field>
+            <field name="model">sync.syscom.brand</field>
+            <field name="arch" type="xml">
+                <list string="Marcas SYSCOM" create="false" class="o_list_optional">
+                    <header>
+                        <button
+                            name="%(server_action_sync_syscom_models_selected)d"
+                            type="action"
+                            string="Sync modelos selección vista"
+                            class="btn-secondary"
+                            groups="sync_syscom.group_sync_syscom_manager"
+                        />
+                        <button
+                            name="%(server_action_sync_syscom_models_marked)d"
+                            type="action"
+                            string="Sync modelos marcados lote"
+                            class="btn-secondary"
+                            groups="sync_syscom.group_sync_syscom_manager"
+                        />
+                        <button
+                            name="%(server_action_sync_syscom_brand)d"
+                            type="action"
+                            string="Sincronizar todas las marcas"
+                            class="btn-primary"
+                            groups="sync_syscom.group_sync_syscom_manager"
+                        />
+                        <button
+                            name="%(server_action_publish_scope_brands)d"
+                            type="action"
+                            string="Publicar selección vista"
+                            class="btn-primary"
+                            groups="sync_syscom.group_sync_syscom_manager"
+                        />
+                        <button
+                            name="%(server_action_publish_scope_brands_marked)d"
+                            type="action"
+                            string="Publicar marcadas lote"
+                            class="btn-secondary"
+                            groups="sync_syscom.group_sync_syscom_manager"
+                        />
+                    </header>
+                    <field name="selected" string="Lote"/>
+                    <field name="name"/>
+                    <field name="syscom_id"/>
+                    <field name="title"/>
+                    <field name="category_count" string="Categorías"/>
+                </list>
+            </field>
+        </record>
+
+        <record id="view_sync_syscom_brand_form" model="ir.ui.view">
+            <field name="name">sync.syscom.brand.form</field>
+            <field name="model">sync.syscom.brand</field>
+            <field name="arch" type="xml">
+                <form string="Marca SYSCOM">
+                    <header>
+                        <button name="action_sync_all_models" type="object" string="Sincronizar todos los modelos" class="btn-secondary" groups="sync_syscom.group_sync_syscom_manager"/>
+                        <button name="%(server_action_publish_scope_brands)d" type="action" string="Publicar selección vista" class="btn-primary" groups="sync_syscom.group_sync_syscom_manager"/>
+                    </header>
+                    <sheet>
+                        <group string="Identidad" colspan="2">
+                            <field name="name"/>
+                            <field name="syscom_id"/>
+                            <field name="title"/>
+                            <field name="logo_url" widget="url"/>
+                        </group>
+                        <group string="Sincronización" colspan="2">
+                            <field name="selected" string="Lote"/>
+                            <field name="active"/>
+                            <field name="category_count" readonly="1"/>
+                        </group>
+                        <group string="Descripción" colspan="4">
+                            <field name="description"/>
+                        </group>
+                        <notebook>
+                            <page string="Categorías">
+                                <field name="category_ids" widget="many2many_tags"/>
+                            </page>
+                        </notebook>
+                    </sheet>
+                </form>
+            </field>
+        </record>
+
+        <record id="action_sync_syscom_brand" model="ir.actions.act_window">
+            <field name="name">Marcas SYSCOM</field>
+            <field name="res_model">sync.syscom.brand</field>
+            <field name="view_id" ref="view_sync_syscom_brand_kanban"/>
+            <field name="view_mode">kanban,list,form</field>
+            <field name="help" type="html">
+                <p class="o_view_nocontent_smiling_face">Sincroniza marcas desde SYSCOM.</p>
+            </field>
+        </record>
+
+        <record id="view_sync_syscom_brand_kanban" model="ir.ui.view">
+            <field name="name">sync.syscom.brand.kanban</field>
+            <field name="model">sync.syscom.brand</field>
+            <field name="arch" type="xml">
+                <kanban create="false" class="o_kanban_small_column">
+                    <field name="logo_url"/>
+                    <field name="title"/>
+                    <field name="name"/>
+                    <field name="syscom_id"/>
+                    <field name="category_count"/>
+                    <field name="selected"/>
+                    <field name="active"/>
+                    <field name="description"/>
+                    <templates>
+                        <t t-name="kanban-box">
+                            <t t-call="sync_syscom.sync_syscom_brand_card"/>
+                        </t>
+                        <t t-name="card">
+                            <t t-call="sync_syscom.sync_syscom_brand_card"/>
+                        </t>
+                        <t t-name="sync_syscom.sync_syscom_brand_card">
+                            <div class="oe_kanban_global_click">
+                                <div class="o_kanban_image">
+                                    <t t-if="record.logo_url.raw_value">
+                                        <img t-att-src="record.logo_url.raw_value" alt="Logo" style="max-height:60px; max-width:120px; object-fit:contain;"/>
+                                    </t>
+                                    <t t-else="">
+                                        <div class="o_placeholder o_image" style="height:60px; width:120px;">Sin logo</div>
+                                    </t>
+                                </div>
+                                <div class="o_kanban_details">
+                                    <strong><t t-esc="record.title.value or record.name.value"/></strong>
+                                    <div class="text-muted" t-esc="record.syscom_id.value"/>
+                                    <div class="mt8">
+                                        <span class="badge badge-info" t-if="record.category_count.value">
+                                            <t t-esc="record.category_count.value"/> categorías
+                                        </span>
+                                        <span class="badge badge-success" t-if="record.selected.value">Sincronizar</span>
+                                        <span class="badge badge-danger" t-if="!record.active.value">Archivada</span>
+                                    </div>
+                                    <div class="o_text_overflow" style="max-height:48px;" t-esc="record.description.value"/>
+                                </div>
+                            </div>
+                        </t>
+                    </templates>
+                </kanban>
+            </field>
+        </record>
+
+        <record id="view_sync_syscom_brand_search" model="ir.ui.view">
+            <field name="name">sync.syscom.brand.search</field>
+            <field name="model">sync.syscom.brand</field>
+            <field name="arch" type="xml">
+                <search string="Buscar marcas">
+                    <field name="name"/>
+                    <field name="title"/>
+                    <field name="syscom_id" string="ID SYSCOM"/>
+                    <filter name="selected" string="Marcadas en lote" domain="[( 'selected', '=', True)]"/>
+                    <filter name="active" string="Archivadas" domain="[( 'active', '=', False)]"/>
+                    <separator/>
+                    <field name="category_ids" filter_domain="[( 'category_ids', 'in', self )]"/>
+                </search>
+            </field>
+        </record>
+    </data>
+</odoo>

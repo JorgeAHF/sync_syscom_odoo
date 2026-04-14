@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+        <record id="view_sync_syscom_publish_job_tree" model="ir.ui.view">
+            <field name="name">sync.syscom.publish.job.list</field>
+            <field name="model">sync.syscom.publish.job</field>
+            <field name="arch" type="xml">
+                <list string="Trabajos publicación categorías" create="false">
+                    <field name="create_date"/>
+                    <field name="name"/>
+                    <field name="state"/>
+                    <field name="include_children"/>
+                    <field name="processed_products"/>
+                    <field name="total_products"/>
+                    <field name="queued_products"/>
+                    <field name="last_error"/>
+                </list>
+            </field>
+        </record>
+
+        <record id="view_sync_syscom_publish_job_form" model="ir.ui.view">
+            <field name="name">sync.syscom.publish.job.form</field>
+            <field name="model">sync.syscom.publish.job</field>
+            <field name="arch" type="xml">
+                <form string="Trabajo publicación categorías">
+                    <sheet>
+                        <group>
+                            <field name="name" readonly="1"/>
+                            <field name="state" readonly="1"/>
+                            <field name="include_children" readonly="1"/>
+                            <field name="started_at" readonly="1"/>
+                            <field name="finished_at" readonly="1"/>
+                        </group>
+                        <group string="Progreso">
+                            <field name="product_offset" readonly="1"/>
+                            <field name="processed_products" readonly="1"/>
+                            <field name="total_products" readonly="1"/>
+                            <field name="queued_products" readonly="1"/>
+                        </group>
+                        <group string="Categorías">
+                            <field name="category_ids" widget="many2many_tags" readonly="1"/>
+                            <field name="scope_category_ids" widget="many2many_tags" readonly="1"/>
+                        </group>
+                        <group string="Productos">
+                            <field name="product_ids" widget="many2many_tags" readonly="1"/>
+                        </group>
+                        <group string="Errores">
+                            <field name="last_error" readonly="1"/>
+                        </group>
+                    </sheet>
+                </form>
+            </field>
+        </record>
+
+        <record id="view_sync_syscom_publish_job_search" model="ir.ui.view">
+            <field name="name">sync.syscom.publish.job.search</field>
+            <field name="model">sync.syscom.publish.job</field>
+            <field name="arch" type="xml">
+                <search string="Buscar trabajos de publicación">
+                    <field name="name"/>
+                    <filter name="pending" string="Pendientes" domain="[('state', '=', 'pending')]"/>
+                    <filter name="running" string="Procesando" domain="[('state', '=', 'running')]"/>
+                    <filter name="done" string="Terminados" domain="[('state', '=', 'done')]"/>
+                    <filter name="error" string="Con error" domain="[('state', '=', 'error')]"/>
+                </search>
+            </field>
+        </record>
+
+        <record id="action_sync_syscom_publish_job" model="ir.actions.act_window">
+            <field name="name">Trabajos publicación categorías</field>
+            <field name="res_model">sync.syscom.publish.job</field>
+            <field name="view_mode">list,form</field>
+        </record>
+    </data>
+</odoo>
