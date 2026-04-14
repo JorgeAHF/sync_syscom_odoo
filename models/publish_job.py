@@ -1,6 +1,8 @@
 from odoo import _, api, fields, models
 from odoo.exceptions import UserError
 
+from .constants import DEFAULT_CATEGORY_PUBLISH_PRODUCT_CHUNK
+
 
 class SyncSyscomPublishJob(models.Model):
     _name = "sync.syscom.publish.job"
@@ -56,13 +58,13 @@ class SyncSyscomPublishJob(models.Model):
 
     @classmethod
     def _chunk_limit_default(cls):
-        return 100
+        return DEFAULT_CATEGORY_PUBLISH_PRODUCT_CHUNK
 
     def _get_product_chunk_limit(self):
         params = self.env["ir.config_parameter"].sudo()
         try:
             limit = int(params.get_param("sync_syscom.category_publish_product_chunk_limit") or self._chunk_limit_default())
-        except Exception:
+        except (TypeError, ValueError):
             limit = self._chunk_limit_default()
         return max(limit, 1)
 
@@ -133,11 +135,9 @@ class SyncSyscomPublishJob(models.Model):
             "finished_at": fields.Datetime.now(),
             "last_error": message,
         })
-        self.env["sync.syscom.log"].sudo().create({
-            "name": _("Trabajo publicación categorías con error"),
-            "kind": "error",
-            "message": "%s: %s" % (self.display_name, message),
-        })
+        subject = _("Trabajo publicación categorías con error")
+        full_message = "%s: %s" % (self.display_name, message)
+        self.env["sync.syscom.log"].sudo().notify_admin_on_critical_error(subject, full_message)
 
     def _process_batch(self):
         self.ensure_one()

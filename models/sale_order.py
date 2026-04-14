@@ -1,7 +1,10 @@
+import requests
+
 from odoo import _, fields, models
 from odoo.exceptions import UserError
 
 from .syscom_client import SyscomClient
+from .constants import SYSCOM_DEFAULT_BASE_URL, SYSCOM_DEFAULT_TIMEOUT
 
 
 class SaleOrder(models.Model):
@@ -20,8 +23,8 @@ class SaleOrder(models.Model):
         if not token:
             raise UserError(_("No se puede validar SYSCOM: falta token en Ajustes."))
 
-        base_url = params.get_param("sync_syscom.syscom_base_url") or "https://developers.syscom.mx/api/v1"
-        timeout = int(params.get_param("sync_syscom.syscom_timeout") or 30)
+        base_url = params.get_param("sync_syscom.syscom_base_url") or SYSCOM_DEFAULT_BASE_URL
+        timeout = int(params.get_param("sync_syscom.syscom_timeout") or SYSCOM_DEFAULT_TIMEOUT)
         client = SyscomClient(base_url=base_url, token=token, timeout=timeout)
 
         for order in self:
@@ -47,7 +50,7 @@ class SaleOrder(models.Model):
                 tmpl = tmpl_by_syscom.get(syscom_id)
                 try:
                     detail = client.get_product_detail(syscom_id) or {}
-                except Exception as exc:
+                except (UserError, requests.exceptions.RequestException) as exc:
                     if tmpl:
                         tmpl.sudo().write({"syscom_api_ok": False})
                     raise UserError(
@@ -58,7 +61,7 @@ class SaleOrder(models.Model):
                 existencia = detail.get("existencia") or {}
                 try:
                     stock_new = int(existencia.get("nuevo") or 0)
-                except Exception:
+                except (TypeError, ValueError):
                     stock_new = 0
 
                 if tmpl:

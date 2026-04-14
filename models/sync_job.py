@@ -1,4 +1,5 @@
 from odoo import _, api, fields, models
+from odoo.exceptions import UserError
 
 
 JOB_FLOWS = {
@@ -154,11 +155,9 @@ class SyncSyscomSyncJob(models.Model):
             "finished_at": fields.Datetime.now(),
             "last_error": message,
         })
-        self.env["sync.syscom.log"].sudo().create({
-            "name": _("Trabajo de sync con error"),
-            "kind": "error",
-            "message": "%s: %s" % (self.display_name, message),
-        })
+        subject = _("Trabajo de sync con error")
+        full_message = "%s: %s" % (self.display_name, message)
+        self.env["sync.syscom.log"].sudo().notify_admin_on_critical_error(subject, full_message)
 
     def _start_if_needed(self):
         self.ensure_one()

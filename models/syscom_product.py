@@ -2,6 +2,14 @@ from odoo import fields, models
 from odoo.exceptions import UserError
 from urllib.parse import urlparse, urlunparse
 
+from .constants import (
+    SYSCOM_DEFAULT_BASE_URL,
+    SYSCOM_DEFAULT_TIMEOUT,
+    DEFAULT_PUBLISH_BATCH_SIZE,
+    DEFAULT_MIN_STOCK,
+    DEFAULT_COST_DISCOUNT_PCT,
+)
+
 
 class SyscomProduct(models.Model):
     _name = "sync.syscom.product"
@@ -182,7 +190,7 @@ class SyscomProduct(models.Model):
 
     def _compute_syscom_cost(self, prices_mxn, params):
         """Return standard_price using SYSCOM discount price as base."""
-        cost_pct = float(params.get_param("sync_syscom.cost_discount_pct") or 4.0)
+        cost_pct = float(params.get_param("sync_syscom.cost_discount_pct") or DEFAULT_COST_DISCOUNT_PCT)
         discount_price = self._to_float((prices_mxn or {}).get("discount_price_mxn"))
         return discount_price * (1 - cost_pct / 100.0), cost_pct
 
@@ -806,6 +814,7 @@ class SyscomProduct(models.Model):
             ("processing", "Procesando"),
             ("done", "Publicado"),
             ("error", "Error"),
+            ("abandoned", "Abandonado"),
         ],
         string="Estado publicación",
         default="none",
@@ -814,6 +823,11 @@ class SyscomProduct(models.Model):
     publish_enqueued_at = fields.Datetime(string="Encolado publicación")
     publish_started_at = fields.Datetime(string="Inicio publicación")
     publish_done_at = fields.Datetime(string="Fin publicación")
+    publish_retry_count = fields.Integer(
+        string="Reintentos publicación",
+        default=0,
+        help="Número de intentos fallidos consecutivos. Cuando supera el máximo configurado el producto queda 'Abandonado'.",
+    )
 
     _syscom_id_unique = models.Constraint(
         "unique(syscom_id)",
@@ -827,8 +841,8 @@ class SyscomProduct(models.Model):
         token = (params.get_param("sync_syscom.syscom_api_token") or "").strip()
         if not token:
             raise UserError("Configura el token en Ajustes antes de sincronizar.")
-        base_url = params.get_param("sync_syscom.syscom_base_url") or "https://developers.syscom.mx/api/v1"
-        timeout = int(params.get_param("sync_syscom.syscom_timeout") or 30)
+        base_url = params.get_param("sync_syscom.syscom_base_url") or SYSCOM_DEFAULT_BASE_URL
+        timeout = int(params.get_param("sync_syscom.syscom_timeout") or SYSCOM_DEFAULT_TIMEOUT)
         from .syscom_client import SyscomClient
         return SyscomClient(base_url=base_url, token=token, timeout=timeout)
 
@@ -864,7 +878,7 @@ class SyscomProduct(models.Model):
         rate_payload = client.get_exchange_rate() or {}
         try:
             exchange_rate = float(rate_payload.get("una_semana") or rate_payload.get("normal") or 1.0)
-        except Exception:
+        except (TypeError, ValueError):
             exchange_rate = 1.0
         exchange_rate_date = fields.Date.context_today(self)
         return exchange_rate, exchange_rate_date
@@ -1021,7 +1035,7 @@ class SyscomProduct(models.Model):
         rate_payload = client.get_exchange_rate() or {}
         try:
             exchange_rate = float(rate_payload.get("una_semana") or rate_payload.get("normal") or 1.0)
-        except Exception:
+        except (TypeError, ValueError):
             exchange_rate = 1.0
         exchange_rate_date = fields.Date.context_today(self)
 
@@ -1096,7 +1110,7 @@ class SyscomProduct(models.Model):
 
         try:
             hours = int(params.get_param("sync_syscom.stock_refresh_hours") or 4)
-        except Exception:
+        except (TypeError, ValueError):
             hours = 4
         if hours < 1:
             hours = 1
@@ -1108,7 +1122,7 @@ class SyscomProduct(models.Model):
                 last_dt = fields.Datetime.from_string(last_run)
                 if last_dt and (now - last_dt).total_seconds() < hours * 3600:
                     return
-            except Exception:
+            except (TypeError, ValueError):
                 pass
 
         client = self._get_client()
@@ -1117,7 +1131,7 @@ class SyscomProduct(models.Model):
         rate_payload = client.get_exchange_rate() or {}
         try:
             exchange_rate = float(rate_payload.get("una_semana") or rate_payload.get("normal") or 1.0)
-        except Exception:
+        except (TypeError, ValueError):
             exchange_rate = 1.0
         price_currency = params.get_param("sync_syscom.price_currency") or "usd"
 
@@ -1454,6 +1468,7 @@ class SyscomProduct(models.Model):
             "publish_enqueued_at": queued_at,
             "publish_started_at": False,
             "publish_done_at": False,
+            "publish_retry_count": 0,
             "sync_error": False,
         })
 
@@ -1548,19 +1563,60 @@ class SyscomProduct(models.Model):
             },
         }
 
+    def _get_publish_max_retries(self, params=None):
+        """Número máximo de reintentos antes de marcar un producto como 'abandoned'."""
+        from .constants import DEFAULT_PUBLISH_MAX_RETRIES
+        params = params or self.env["ir.config_parameter"].sudo()
+        try:
+            return max(1, int(params.get_param("sync_syscom.publish_max_retries") or DEFAULT_PUBLISH_MAX_RETRIES))
+        except (TypeError, ValueError):
+            return DEFAULT_PUBLISH_MAX_RETRIES
+
+    def action_reset_publish_state(self):
+        """Reinicia el estado de publicación de los productos seleccionados para que se reintenten."""
+        records = self.exists()
+        if not records:
+            raise UserError("Selecciona al menos un producto.")
+        records.write({
+            "publish_state": "pending",
+            "publish_retry_count": 0,
+            "sync_error": False,
+            "publish_enqueued_at": fields.Datetime.now(),
+        })
+        return {
+            "type": "ir.actions.client",
+            "tag": "display_notification",
+            "params": {
+                "title": "Sync SYSCOM",
+                "message": "%s productos reiniciados para publicación." % len(records),
+                "type": "success",
+                "sticky": False,
+            },
+        }
+
     def cron_publish_selected_products(self):
-        """Cron: publica productos pendientes en batches para evitar timeouts."""
+        """Cron: publica productos pendientes en batches para evitar timeouts.
+
+        Reintentos: al fallar, incrementa publish_retry_count.  Cuando supera el
+        máximo configurado (sync_syscom.publish_max_retries) el producto pasa a
+        'abandoned' en lugar de 'error', lo que impide que se vuelva a intentar
+        automáticamente.
+        """
         params = self.env["ir.config_parameter"].sudo()
         try:
-            batch_size = int(params.get_param("sync_syscom.publish_batch_size") or 10)
-        except Exception:
-            batch_size = 10
+            batch_size = int(params.get_param("sync_syscom.publish_batch_size") or DEFAULT_PUBLISH_BATCH_SIZE)
+        except (TypeError, ValueError):
+            batch_size = DEFAULT_PUBLISH_BATCH_SIZE
         if batch_size < 1:
-            batch_size = 10
+            batch_size = DEFAULT_PUBLISH_BATCH_SIZE
 
+        max_retries = self._get_publish_max_retries(params)
+
+        # También reintentar productos en estado 'error' que aún no superaron el límite.
         pending = self.search(
-            [("publish_state", "=", "pending")],
-            order="publish_enqueued_at desc, id desc",
+            [("publish_state", "in", ["pending", "error"]),
+             ("publish_retry_count", "<", max_retries)],
+            order="publish_enqueued_at asc, id asc",
             limit=batch_size,
         )
         if not pending:
@@ -1575,6 +1631,7 @@ class SyscomProduct(models.Model):
 
         ok = 0
         err = 0
+        abandoned = 0
         for prod in pending:
             try:
                 detail = client.get_product_detail(prod.syscom_id) or {}
@@ -1582,31 +1639,46 @@ class SyscomProduct(models.Model):
                 prod.write({
                     "publish_state": "done",
                     "publish_done_at": fields.Datetime.now(),
+                    "publish_retry_count": 0,
                     "selected": False,
                 })
                 ok += 1
             except Exception as exc:
                 err += 1
+                new_retry_count = (prod.publish_retry_count or 0) + 1
+                if new_retry_count >= max_retries:
+                    new_state = "abandoned"
+                    abandoned += 1
+                else:
+                    new_state = "error"
                 prod.write({
-                    "publish_state": "error",
+                    "publish_state": new_state,
                     "publish_done_at": fields.Datetime.now(),
+                    "publish_retry_count": new_retry_count,
                     "sync_error": str(exc),
                 })
                 self.env["sync.syscom.log"].sudo().create({
                     "name": "Error publicación background",
                     "kind": "error",
-                    "message": "%s (%s)" % (prod.name or prod.syscom_id, exc),
+                    "message": "%(label)s – intento %(n)s/%(max)s. Estado: %(state)s. Error: %(err)s." % {
+                        "label": prod.name or prod.syscom_id,
+                        "n": new_retry_count,
+                        "max": max_retries,
+                        "state": new_state,
+                        "err": exc,
+                    },
                 })
                 continue
 
         self.env["sync.syscom.log"].sudo().create({
             "name": "Publicación en background (batch)",
             "kind": "info",
-            "message": "Batch publicado. Modelos: %(products)s. OK: %(ok)s, errores: %(err)s."
+            "message": "Batch publicado. Modelos: %(products)s. OK: %(ok)s, errores: %(err)s, abandonados: %(ab)s."
             % {
                 "products": self._describe_products_for_log(pending),
                 "ok": ok,
                 "err": err,
+                "ab": abandoned,
             },
         })
  
