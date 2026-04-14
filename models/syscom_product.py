@@ -1031,6 +1031,8 @@ class SyscomProduct(models.Model):
 
     def cron_update_exchange_rate(self):
         """Cron semanal: recalcula precios MXN en staging y plantillas publicadas."""
+        params = self.env["ir.config_parameter"].sudo()
+        price_currency = params.get_param("sync_syscom.price_currency") or "usd"
         client = self._get_client()
         rate_payload = client.get_exchange_rate() or {}
         try:
@@ -1039,23 +1041,25 @@ class SyscomProduct(models.Model):
             exchange_rate = 1.0
         exchange_rate_date = fields.Date.context_today(self)
 
+        def _to_mxn(raw_price):
+            """Convert raw SYSCOM price to MXN, respecting price_currency setting."""
+            v = self._to_float(raw_price)
+            return v if price_currency != "usd" else v * exchange_rate
+
         # Actualizar staging
         products = self.search([])
         for prod in products:
-            if prod.price_list is None:
+            if not prod.price_list:
                 continue
-            price_list = self._to_float(prod.price_list)
-            price_special = self._to_float(prod.price_special)
-            price_discounts = self._to_float(prod.price_discounts)
             prod.write({
-                "price_list_mxn": price_list * exchange_rate,
-                "price_special_mxn": price_special * exchange_rate,
-                "price_discounts_mxn": price_discounts * exchange_rate,
+                "price_list_mxn": _to_mxn(prod.price_list),
+                "price_special_mxn": _to_mxn(prod.price_special),
+                "price_discounts_mxn": _to_mxn(prod.price_discounts),
                 "exchange_rate": exchange_rate,
                 "exchange_rate_date": exchange_rate_date,
             })
 
-        # Actualizar plantillas existentes por default_code
+        # Actualizar plantillas existentes por syscom_product_id / default_code
         templates = self.env["product.template"].search([
             ("syscom_is_product", "=", True),
             ("syscom_product_id", "!=", False),
@@ -1077,22 +1081,23 @@ class SyscomProduct(models.Model):
                 prod = products_by_model.get((tmpl.default_code or "").strip())
             if not prod:
                 continue
-            price_list_mxn = self._to_float(prod.price_list) * exchange_rate
-            price_special_mxn = self._to_float(prod.price_special) * exchange_rate
-            price_discounts_mxn = self._to_float(prod.price_discounts) * exchange_rate
+            price_list_mxn = _to_mxn(prod.price_list)
+            price_special_mxn = _to_mxn(prod.price_special)
+            price_discounts_mxn = _to_mxn(prod.price_discounts)
             tmpl.write({"list_price": price_list_mxn})
             self._update_template_pricelists_and_cost(tmpl, {
                 "list_price_mxn": price_list_mxn,
                 "special_price_mxn": price_special_mxn,
                 "discount_price_mxn": price_discounts_mxn,
-            }, self.env["ir.config_parameter"].sudo())
+            }, params)
             updated_templates += 1
 
-        self.env["sync.syscom.log"].create({
+        self.env["sync.syscom.log"].sudo().create({
             "name": "Actualización tipo de cambio SYSCOM",
             "kind": "info",
-            "message": "Tasa aplicada: %(rate)s. Productos staging: %(p)s. Plantillas actualizadas: %(t)s" % {
+            "message": "Tasa aplicada: %(rate)s (moneda: %(currency)s). Productos staging: %(p)s. Plantillas actualizadas: %(t)s" % {
                 "rate": exchange_rate,
+                "currency": price_currency,
                 "p": len(products),
                 "t": updated_templates,
             },
@@ -1255,8 +1260,11 @@ class SyscomProduct(models.Model):
         token = (params.get_param("sync_syscom.syscom_api_token") or "").strip()
         if not token:
             raise UserError("Configura el token en Ajustes antes de publicar productos.")
-        base_url = params.get_param("sync_syscom.syscom_base_url") or "https://developers.syscom.mx/api/v1"
-        timeout = int(params.get_param("sync_syscom.syscom_timeout") or 30)
+        base_url = params.get_param("sync_syscom.syscom_base_url") or SYSCOM_DEFAULT_BASE_URL
+        try:
+            timeout = int(params.get_param("sync_syscom.syscom_timeout") or SYSCOM_DEFAULT_TIMEOUT)
+        except (TypeError, ValueError):
+            timeout = SYSCOM_DEFAULT_TIMEOUT
         from .syscom_client import SyscomClient
         client = SyscomClient(base_url=base_url, token=token, timeout=timeout)
 
@@ -1269,7 +1277,7 @@ class SyscomProduct(models.Model):
         rate_payload = client.get_exchange_rate() or {}
         try:
             exchange_rate = float(rate_payload.get("una_semana") or rate_payload.get("normal") or 1.0)
-        except Exception:
+        except (TypeError, ValueError):
             exchange_rate = 1.0
         exchange_rate_date = fields.Date.context_today(self)
         min_stock = int(params.get_param("sync_syscom.min_stock") or 1)
