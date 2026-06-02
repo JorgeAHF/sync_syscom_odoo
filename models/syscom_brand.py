@@ -553,30 +553,34 @@ class SyscomBrand(models.Model):
         return self.action_sync_models_marked()
 
     def action_sync_models_for_brands(self):
-        """Sincroniza modelos para marcas seleccionadas en la vista y categorías marcadas en lote."""
+        """Sincroniza modelos para marcas seleccionadas en la vista.
+
+        Si hay categorías marcadas en lote filtra por ellas; si no, sincroniza
+        todos los modelos de las marcas seleccionadas sin filtro de categoría.
+        """
         categories_selected = self._get_selected_categories()
         selected_cat_ids = set(categories_selected.mapped("syscom_id"))
-        if not selected_cat_ids:
-            raise UserError(_("Marca al menos una categoría en la columna Lote antes de sincronizar modelos."))
 
         brands = self._require_brands_for_view_action("Sincronizar modelos selección vista")
         return self._run_sync_models_action(
             brands,
-            selected_cat_ids,
+            selected_cat_ids or None,
             source_label=_("selección vista"),
         )
 
     def action_sync_models_marked(self):
-        """Sincroniza modelos para marcas y categorías marcadas en lote."""
+        """Sincroniza modelos para marcas marcadas en lote.
+
+        Si hay categorías marcadas en lote filtra por ellas; si no, sincroniza
+        todos los modelos de las marcas marcadas sin filtro de categoría.
+        """
         categories_selected = self._get_selected_categories()
         selected_cat_ids = set(categories_selected.mapped("syscom_id"))
-        if not selected_cat_ids:
-            raise UserError(_("Marca al menos una categoría en la columna Lote antes de sincronizar modelos."))
 
         brands = self._require_marked_brands("Sincronizar modelos marcados en lote")
         return self._run_sync_models_action(
             brands,
-            selected_cat_ids,
+            selected_cat_ids or None,
             source_label=_("marcados en lote"),
         )
 

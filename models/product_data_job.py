@@ -125,11 +125,9 @@ class SyncSyscomProductDataJob(models.Model):
         skipped_products = 0
 
         for product in batch_products:
-            detail = product.payload if isinstance(product.payload, dict) else {}
-            if not Product._detail_has_extended_values(detail):
-                client = client or Product._get_client()
-                detail = client.get_product_detail(product.syscom_id) or {}
-                remote_fetches += 1
+            client = client or Product._get_client()
+            detail = client.get_product_detail(product.syscom_id) or {}
+            remote_fetches += 1
             if not Product._detail_has_extended_values(detail):
                 skipped_products += 1
                 continue

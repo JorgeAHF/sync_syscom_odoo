@@ -924,10 +924,7 @@ class SyscomProduct(models.Model):
         min_stock = int(params.get_param("sync_syscom.min_stock") or 1)
         if min_stock < 1:
             min_stock = 1
-        if stock_new < min_stock:
-            raise UserError(
-                "Stock insuficiente en SYSCOM (nuevo=%s). Mínimo requerido: %s." % (stock_new, min_stock)
-            )
+        stock_ok = stock_new >= min_stock
 
         product_vals = {
             "name": name,
@@ -1023,11 +1020,15 @@ class SyscomProduct(models.Model):
 
         # Requerimiento: recursos/imagenes antes de publicar
         self._sync_template_media_and_resources(template, detail)
-        self._ensure_template_published_on_website(template)
+        if stock_ok:
+            self._ensure_template_published_on_website(template)
         # Enforce doc publication after publish too (some hooks depend on is_published).
         self._ensure_template_documents_published(template)
 
-        return template, created
+        low_stock_note = None if stock_ok else (
+            "Sin stock suficiente (nuevo=%s, mínimo=%s) — no publicado en eCommerce." % (stock_new, min_stock)
+        )
+        return template, created, low_stock_note
 
     def cron_update_exchange_rate(self):
         """Cron semanal: recalcula precios MXN en staging y plantillas publicadas."""
@@ -1139,6 +1140,7 @@ class SyscomProduct(models.Model):
         except (TypeError, ValueError):
             exchange_rate = 1.0
         price_currency = params.get_param("sync_syscom.price_currency") or "usd"
+        min_stock = max(1, int(params.get_param("sync_syscom.min_stock") or 1))
 
         # 1) Refresh staging "selected" (mantener info interna)
         selected = self._get_marked_for_batch()
@@ -1237,6 +1239,12 @@ class SyscomProduct(models.Model):
                 self._apply_extended_values_to_template(tmpl, detail, staging_product=staging_product)
                 # Enforce documents visibility on the website (URLs from SYSCOM resources)
                 self._ensure_template_documents_published(tmpl)
+                stock_ok = stock_new >= min_stock
+                currently_published = getattr(tmpl, "is_published", False)
+                if stock_ok and not currently_published:
+                    self._ensure_template_published_on_website(tmpl)
+                elif not stock_ok and currently_published and "is_published" in tmpl._fields:
+                    tmpl.write({"is_published": False})
                 updated += 1
             except Exception:
                 tmpl.write({"syscom_api_ok": False, "syscom_stock_synced_at": now})
@@ -1325,11 +1333,8 @@ class SyscomProduct(models.Model):
                 images_json = detail.get("imágenes") or detail.get("imagenes") or []
                 resources_json = detail.get("recursos") or []
 
-                # Validación de stock mínimo antes de dar de alta/publicar
-                if stock_new < min_stock:
-                    raise UserError(
-                        "Stock insuficiente en SYSCOM (nuevo=%s). Mínimo requerido: %s." % (stock_new, min_stock)
-                    )
+                # Determinar si hay stock suficiente para publicar en eCommerce
+                stock_ok = stock_new >= min_stock
 
                 product_vals = {
                     "name": name,
@@ -1432,7 +1437,10 @@ class SyscomProduct(models.Model):
                 # Imágenes/recursos primero, luego publicar.
                 # (Requerimiento: asegurar que los documentos queden listos antes de que el producto sea visible.)
                 self._sync_template_media_and_resources(template, detail)
-                self._ensure_template_published_on_website(template)
+                if stock_ok:
+                    self._ensure_template_published_on_website(template)
+                else:
+                    product.write({"sync_error": "Sin stock suficiente (nuevo=%s, mínimo=%s) — no publicado en eCommerce." % (stock_new, min_stock)})
 
             except Exception as exc:
                 failed += 1
@@ -1545,6 +1553,19 @@ class SyscomProduct(models.Model):
             },
         }
 
+    def action_start_sync_catalog_models(self):
+        job = self.env["sync.syscom.sync.job"].create_brands_products_job()
+        return {
+            "type": "ir.actions.client",
+            "tag": "display_notification",
+            "params": {
+                "title": "Sync SYSCOM",
+                "message": "Trabajo de sincronización de catálogo de modelos programado: %s." % job.display_name,
+                "type": "success",
+                "sticky": False,
+            },
+        }
+
     def action_start_sync_extended_product_data(self):
         job = self.env["sync.syscom.product.data.job"].create_sync_all_job()
         return {
@@ -1643,12 +1664,13 @@ class SyscomProduct(models.Model):
         for prod in pending:
             try:
                 detail = client.get_product_detail(prod.syscom_id) or {}
-                self._publish_one_from_detail(prod, detail, params, exchange_rate, exchange_rate_date, price_currency)
+                _template, _created, low_stock_note = self._publish_one_from_detail(prod, detail, params, exchange_rate, exchange_rate_date, price_currency)
                 prod.write({
                     "publish_state": "done",
                     "publish_done_at": fields.Datetime.now(),
                     "publish_retry_count": 0,
                     "selected": False,
+                    "sync_error": low_stock_note or False,
                 })
                 ok += 1
             except Exception as exc:
