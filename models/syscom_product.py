@@ -89,7 +89,7 @@ class SyscomProduct(models.Model):
 
         def _find(code):
             return Account.search(
-                [("code", "=", code), ("company_id", "=", company_id)],
+                [("code", "=", code), ("company_ids", "in", [company_id])],
                 limit=1,
             )
 
