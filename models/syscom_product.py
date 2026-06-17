@@ -83,9 +83,14 @@ class SyscomProduct(models.Model):
         return categories[0] if categories else None
 
     def _assign_syscom_category_accounts(self, product_category):
-        """Assign standard SYSCOM accounting accounts to a product.category."""
+        """Assign standard SYSCOM accounting accounts to a product.category.
+
+        Field names changed in Odoo 17+ (property_ prefix removed), so we
+        probe _fields to pick whichever name exists in the running version.
+        """
         Account = self.env["account.account"].sudo()
         company_id = self.env.company.id
+        cat_fields = product_category._fields
 
         def _find(code):
             return Account.search(
@@ -93,20 +98,33 @@ class SyscomProduct(models.Model):
                 limit=1,
             )
 
+        def _field(*candidates):
+            for name in candidates:
+                if name in cat_fields:
+                    return name
+            return None
+
         vals = {}
-        acc_income = _find("401.01.01")
-        if acc_income:
-            vals["property_account_income_categ_id"] = acc_income.id
-        acc_expense = _find("501.01.01")
-        if acc_expense:
-            vals["property_account_expense_categ_id"] = acc_expense.id
-        acc_inventory = _find("115.01.02")
-        if acc_inventory:
-            vals["property_stock_valuation_account_id"] = acc_inventory.id
-        acc_variation = _find("501.01.02")
-        if acc_variation:
-            vals["property_stock_account_input_categ_id"] = acc_variation.id
-            vals["property_stock_account_output_categ_id"] = acc_variation.id
+        f = _field("account_income_categ_id", "property_account_income_categ_id")
+        if f and (acc := _find("401.01.01")):
+            vals[f] = acc.id
+
+        f = _field("account_expense_categ_id", "property_account_expense_categ_id")
+        if f and (acc := _find("501.01.01")):
+            vals[f] = acc.id
+
+        f = _field("stock_valuation_account_id", "property_stock_valuation_account_id")
+        if f and (acc := _find("115.01.02")):
+            vals[f] = acc.id
+
+        f = _field("stock_account_input_categ_id", "property_stock_account_input_categ_id")
+        if f and (acc := _find("501.01.02")):
+            vals[f] = acc.id
+
+        f = _field("stock_account_output_categ_id", "property_stock_account_output_categ_id")
+        if f and (acc := _find("501.01.02")):
+            vals[f] = acc.id
+
         if vals:
             product_category.sudo().write(vals)
 
