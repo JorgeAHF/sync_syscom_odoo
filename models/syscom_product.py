@@ -82,6 +82,34 @@ class SyscomProduct(models.Model):
         categories = categories.sorted(key=lambda c: c.level or 0, reverse=True)
         return categories[0] if categories else None
 
+    def _assign_syscom_category_accounts(self, product_category):
+        """Assign standard SYSCOM accounting accounts to a product.category."""
+        Account = self.env["account.account"].sudo()
+        company_id = self.env.company.id
+
+        def _find(code):
+            return Account.search(
+                [("code", "=", code), ("company_id", "=", company_id)],
+                limit=1,
+            )
+
+        vals = {}
+        acc_income = _find("401.01.01")
+        if acc_income:
+            vals["property_account_income_categ_id"] = acc_income.id
+        acc_expense = _find("501.01.01")
+        if acc_expense:
+            vals["property_account_expense_categ_id"] = acc_expense.id
+        acc_inventory = _find("115.01.02")
+        if acc_inventory:
+            vals["property_stock_valuation_account_id"] = acc_inventory.id
+        acc_variation = _find("501.01.02")
+        if acc_variation:
+            vals["property_stock_account_input_categ_id"] = acc_variation.id
+            vals["property_stock_account_output_categ_id"] = acc_variation.id
+        if vals:
+            product_category.sudo().write(vals)
+
     def _ensure_product_category(self, syscom_category):
         """Create/link a product.category matching the SYSCOM category tree."""
         if not syscom_category:
@@ -103,6 +131,7 @@ class SyscomProduct(models.Model):
             if parent_product_category:
                 vals["parent_id"] = parent_product_category.id
             product_category = ProductCategory.create(vals)
+            self._assign_syscom_category_accounts(product_category)
 
         syscom_category.write({"product_category_id": product_category.id})
         return product_category
