@@ -285,7 +285,7 @@ class SyscomBrand(models.Model):
 
             vals = {
                 "syscom_id": syscom_id,
-                "name": detail.get("titulo") or brand.get("nombre") or syscom_id,
+                "name": brand.get("nombre") or detail.get("titulo") or syscom_id,
                 "title": detail.get("titulo") or brand.get("nombre") or "",
                 "description": detail.get("descripcion") or "",
                 "logo_url": detail.get("logo") or "",
@@ -477,7 +477,7 @@ class SyscomBrand(models.Model):
 
             vals = {
                 "syscom_id": syscom_id,
-                "name": detail.get("titulo") or brand.get("nombre") or syscom_id,
+                "name": brand.get("nombre") or detail.get("titulo") or syscom_id,
                 "title": detail.get("titulo") or brand.get("nombre") or "",
                 "description": detail.get("descripcion") or "",
                 "logo_url": detail.get("logo") or "",
