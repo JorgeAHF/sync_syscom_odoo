@@ -1162,11 +1162,11 @@ class SyscomProduct(models.Model):
             return
 
         try:
-            hours = int(params.get_param("sync_syscom.stock_refresh_hours") or 4)
+            hours = float(params.get_param("sync_syscom.stock_refresh_hours") or 4)
         except (TypeError, ValueError):
             hours = 4
-        if hours < 1:
-            hours = 1
+        if hours < 0:
+            hours = 0
 
         now = fields.Datetime.now()
         last_run = params.get_param("sync_syscom.stock_refresh_last_run")
