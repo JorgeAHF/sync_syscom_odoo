@@ -1231,14 +1231,32 @@ class SyscomProduct(models.Model):
             except Exception as exc:
                 prod.write({"sync_error": str(exc), "synced_at": now})
 
-        # 2) Refresh product.template publicados (eCommerce)
+        # 2) Refresh product.template publicados (eCommerce) -- POR LOTES
         Template = self.env["product.template"].sudo()
-        domain = [
+
+        try:
+            batch_size = int(params.get_param("sync_syscom.stock_refresh_batch_size") or 200)
+        except (TypeError, ValueError):
+            batch_size = 200
+        if batch_size < 1:
+            batch_size = 200
+
+        try:
+            last_id = int(params.get_param("sync_syscom.stock_refresh_last_id") or 0)
+        except (TypeError, ValueError):
+            last_id = 0
+
+        base_domain = [
             ("syscom_is_product", "=", True),
             ("syscom_product_id", "!=", False),
             ("is_published", "=", True),
         ]
-        templates = Template.search(domain)
+        domain = base_domain + [("id", ">", last_id)]
+        templates = Template.search(domain, order="id", limit=batch_size)
+
+        if not templates:
+            params.set_param("sync_syscom.stock_refresh_last_id", "0")
+            templates = Template.search(base_domain, order="id", limit=batch_size)
 
         for tmpl in templates:
             if not tmpl._has_syscom_vendor():
@@ -1297,6 +1315,8 @@ class SyscomProduct(models.Model):
                 tmpl.write({"syscom_api_ok": False, "syscom_stock_synced_at": now})
                 failed += 1
 
+        if templates:
+            params.set_param("sync_syscom.stock_refresh_last_id", str(templates[-1].id))
         params.set_param("sync_syscom.stock_refresh_last_run", fields.Datetime.to_string(now))
 
         self.env["sync.syscom.log"].sudo().create({
