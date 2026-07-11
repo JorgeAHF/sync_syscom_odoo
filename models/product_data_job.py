@@ -1,5 +1,7 @@
 from odoo import _, api, fields, models
 
+from .constants import DEFAULT_PRODUCT_DATA_BATCH_SIZE
+
 
 class SyncSyscomProductDataJob(models.Model):
     _name = "sync.syscom.product.data.job"
@@ -32,13 +34,13 @@ class SyncSyscomProductDataJob(models.Model):
 
     @classmethod
     def _default_batch_size(cls):
-        return 100
+        return DEFAULT_PRODUCT_DATA_BATCH_SIZE
 
     def _get_batch_size(self):
         params = self.env["ir.config_parameter"].sudo()
         try:
             size = int(params.get_param("sync_syscom.product_data_batch_size") or self._default_batch_size())
-        except Exception:
+        except (TypeError, ValueError):
             size = self._default_batch_size()
         return max(size, 1)
 
@@ -88,11 +90,9 @@ class SyncSyscomProductDataJob(models.Model):
             "finished_at": fields.Datetime.now(),
             "last_error": message,
         })
-        self.env["sync.syscom.log"].sudo().create({
-            "name": _("Trabajo datos extendidos con error"),
-            "kind": "error",
-            "message": "%s: %s" % (self.display_name, message),
-        })
+        subject = _("Trabajo datos extendidos con error")
+        full_message = "%s: %s" % (self.display_name, message)
+        self.env["sync.syscom.log"].sudo().notify_admin_on_critical_error(subject, full_message)
 
     def _process_batch(self):
         self.ensure_one()
@@ -125,11 +125,9 @@ class SyncSyscomProductDataJob(models.Model):
         skipped_products = 0
 
         for product in batch_products:
-            detail = product.payload if isinstance(product.payload, dict) else {}
-            if not Product._detail_has_extended_values(detail):
-                client = client or Product._get_client()
-                detail = client.get_product_detail(product.syscom_id) or {}
-                remote_fetches += 1
+            client = client or Product._get_client()
+            detail = client.get_product_detail(product.syscom_id) or {}
+            remote_fetches += 1
             if not Product._detail_has_extended_values(detail):
                 skipped_products += 1
                 continue

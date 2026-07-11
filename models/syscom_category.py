@@ -611,3 +611,21 @@ class SyscomCategory(models.Model):
 
     def action_start_sync_pipeline(self):
         return self.action_sync_categories_and_brands()
+
+    def action_fix_accounting_accounts(self):
+        """Assign SYSCOM accounting accounts to all linked product.category records."""
+        categories = self.search([("product_category_id", "!=", False)])
+        updated = 0
+        for cat in categories:
+            self.env["sync.syscom.product"]._assign_syscom_category_accounts(cat.product_category_id)
+            updated += 1
+        return {
+            "type": "ir.actions.client",
+            "tag": "display_notification",
+            "params": {
+                "title": _("Cuentas contables SYSCOM"),
+                "message": _("Cuentas contables asignadas a %d categorías de producto.") % updated,
+                "type": "success",
+                "sticky": False,
+            },
+        }

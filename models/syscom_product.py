@@ -2,6 +2,14 @@ from odoo import fields, models
 from odoo.exceptions import UserError
 from urllib.parse import urlparse, urlunparse
 
+from .constants import (
+    SYSCOM_DEFAULT_BASE_URL,
+    SYSCOM_DEFAULT_TIMEOUT,
+    DEFAULT_PUBLISH_BATCH_SIZE,
+    DEFAULT_MIN_STOCK,
+    DEFAULT_COST_DISCOUNT_PCT,
+)
+
 
 class SyscomProduct(models.Model):
     _name = "sync.syscom.product"
@@ -74,6 +82,52 @@ class SyscomProduct(models.Model):
         categories = categories.sorted(key=lambda c: c.level or 0, reverse=True)
         return categories[0] if categories else None
 
+    def _assign_syscom_category_accounts(self, product_category):
+        """Assign standard SYSCOM accounting accounts to a product.category.
+
+        Field names changed in Odoo 17+ (property_ prefix removed), so we
+        probe _fields to pick whichever name exists in the running version.
+        """
+        Account = self.env["account.account"].sudo()
+        company_id = self.env.company.id
+        cat_fields = product_category._fields
+
+        def _find(code):
+            return Account.search(
+                [("code", "=", code), ("company_ids", "in", [company_id])],
+                limit=1,
+            )
+
+        def _field(*candidates):
+            for name in candidates:
+                if name in cat_fields:
+                    return name
+            return None
+
+        vals = {}
+        f = _field("account_income_categ_id", "property_account_income_categ_id")
+        if f and (acc := _find("401.01.01")):
+            vals[f] = acc.id
+
+        f = _field("account_expense_categ_id", "property_account_expense_categ_id")
+        if f and (acc := _find("501.01.01")):
+            vals[f] = acc.id
+
+        f = _field("stock_valuation_account_id", "property_stock_valuation_account_id")
+        if f and (acc := _find("115.01.02")):
+            vals[f] = acc.id
+
+        f = _field("stock_account_input_categ_id", "property_stock_account_input_categ_id")
+        if f and (acc := _find("501.01.02")):
+            vals[f] = acc.id
+
+        f = _field("stock_account_output_categ_id", "property_stock_account_output_categ_id")
+        if f and (acc := _find("501.01.02")):
+            vals[f] = acc.id
+
+        if vals:
+            product_category.sudo().write(vals)
+
     def _ensure_product_category(self, syscom_category):
         """Create/link a product.category matching the SYSCOM category tree."""
         if not syscom_category:
@@ -95,6 +149,7 @@ class SyscomProduct(models.Model):
             if parent_product_category:
                 vals["parent_id"] = parent_product_category.id
             product_category = ProductCategory.create(vals)
+            self._assign_syscom_category_accounts(product_category)
 
         syscom_category.write({"product_category_id": product_category.id})
         return product_category
@@ -182,7 +237,7 @@ class SyscomProduct(models.Model):
 
     def _compute_syscom_cost(self, prices_mxn, params):
         """Return standard_price using SYSCOM discount price as base."""
-        cost_pct = float(params.get_param("sync_syscom.cost_discount_pct") or 4.0)
+        cost_pct = float(params.get_param("sync_syscom.cost_discount_pct") or DEFAULT_COST_DISCOUNT_PCT)
         discount_price = self._to_float((prices_mxn or {}).get("discount_price_mxn"))
         return discount_price * (1 - cost_pct / 100.0), cost_pct
 
@@ -806,6 +861,7 @@ class SyscomProduct(models.Model):
             ("processing", "Procesando"),
             ("done", "Publicado"),
             ("error", "Error"),
+            ("abandoned", "Abandonado"),
         ],
         string="Estado publicación",
         default="none",
@@ -814,6 +870,11 @@ class SyscomProduct(models.Model):
     publish_enqueued_at = fields.Datetime(string="Encolado publicación")
     publish_started_at = fields.Datetime(string="Inicio publicación")
     publish_done_at = fields.Datetime(string="Fin publicación")
+    publish_retry_count = fields.Integer(
+        string="Reintentos publicación",
+        default=0,
+        help="Número de intentos fallidos consecutivos. Cuando supera el máximo configurado el producto queda 'Abandonado'.",
+    )
 
     _syscom_id_unique = models.Constraint(
         "unique(syscom_id)",
@@ -827,8 +888,8 @@ class SyscomProduct(models.Model):
         token = (params.get_param("sync_syscom.syscom_api_token") or "").strip()
         if not token:
             raise UserError("Configura el token en Ajustes antes de sincronizar.")
-        base_url = params.get_param("sync_syscom.syscom_base_url") or "https://developers.syscom.mx/api/v1"
-        timeout = int(params.get_param("sync_syscom.syscom_timeout") or 30)
+        base_url = params.get_param("sync_syscom.syscom_base_url") or SYSCOM_DEFAULT_BASE_URL
+        timeout = int(params.get_param("sync_syscom.syscom_timeout") or SYSCOM_DEFAULT_TIMEOUT)
         from .syscom_client import SyscomClient
         return SyscomClient(base_url=base_url, token=token, timeout=timeout)
 
@@ -864,7 +925,7 @@ class SyscomProduct(models.Model):
         rate_payload = client.get_exchange_rate() or {}
         try:
             exchange_rate = float(rate_payload.get("una_semana") or rate_payload.get("normal") or 1.0)
-        except Exception:
+        except (TypeError, ValueError):
             exchange_rate = 1.0
         exchange_rate_date = fields.Date.context_today(self)
         return exchange_rate, exchange_rate_date
@@ -910,10 +971,7 @@ class SyscomProduct(models.Model):
         min_stock = int(params.get_param("sync_syscom.min_stock") or 1)
         if min_stock < 1:
             min_stock = 1
-        if stock_new < min_stock:
-            raise UserError(
-                "Stock insuficiente en SYSCOM (nuevo=%s). Mínimo requerido: %s." % (stock_new, min_stock)
-            )
+        stock_ok = stock_new >= min_stock
 
         product_vals = {
             "name": name,
@@ -1009,39 +1067,47 @@ class SyscomProduct(models.Model):
 
         # Requerimiento: recursos/imagenes antes de publicar
         self._sync_template_media_and_resources(template, detail)
-        self._ensure_template_published_on_website(template)
+        if stock_ok:
+            self._ensure_template_published_on_website(template)
         # Enforce doc publication after publish too (some hooks depend on is_published).
         self._ensure_template_documents_published(template)
 
-        return template, created
+        low_stock_note = None if stock_ok else (
+            "Sin stock suficiente (nuevo=%s, mínimo=%s) — no publicado en eCommerce." % (stock_new, min_stock)
+        )
+        return template, created, low_stock_note
 
     def cron_update_exchange_rate(self):
         """Cron semanal: recalcula precios MXN en staging y plantillas publicadas."""
+        params = self.env["ir.config_parameter"].sudo()
+        price_currency = params.get_param("sync_syscom.price_currency") or "usd"
         client = self._get_client()
         rate_payload = client.get_exchange_rate() or {}
         try:
             exchange_rate = float(rate_payload.get("una_semana") or rate_payload.get("normal") or 1.0)
-        except Exception:
+        except (TypeError, ValueError):
             exchange_rate = 1.0
         exchange_rate_date = fields.Date.context_today(self)
+
+        def _to_mxn(raw_price):
+            """Convert raw SYSCOM price to MXN, respecting price_currency setting."""
+            v = self._to_float(raw_price)
+            return v if price_currency != "usd" else v * exchange_rate
 
         # Actualizar staging
         products = self.search([])
         for prod in products:
-            if prod.price_list is None:
+            if not prod.price_list:
                 continue
-            price_list = self._to_float(prod.price_list)
-            price_special = self._to_float(prod.price_special)
-            price_discounts = self._to_float(prod.price_discounts)
             prod.write({
-                "price_list_mxn": price_list * exchange_rate,
-                "price_special_mxn": price_special * exchange_rate,
-                "price_discounts_mxn": price_discounts * exchange_rate,
+                "price_list_mxn": _to_mxn(prod.price_list),
+                "price_special_mxn": _to_mxn(prod.price_special),
+                "price_discounts_mxn": _to_mxn(prod.price_discounts),
                 "exchange_rate": exchange_rate,
                 "exchange_rate_date": exchange_rate_date,
             })
 
-        # Actualizar plantillas existentes por default_code
+        # Actualizar plantillas existentes por syscom_product_id / default_code
         templates = self.env["product.template"].search([
             ("syscom_is_product", "=", True),
             ("syscom_product_id", "!=", False),
@@ -1063,22 +1129,23 @@ class SyscomProduct(models.Model):
                 prod = products_by_model.get((tmpl.default_code or "").strip())
             if not prod:
                 continue
-            price_list_mxn = self._to_float(prod.price_list) * exchange_rate
-            price_special_mxn = self._to_float(prod.price_special) * exchange_rate
-            price_discounts_mxn = self._to_float(prod.price_discounts) * exchange_rate
+            price_list_mxn = _to_mxn(prod.price_list)
+            price_special_mxn = _to_mxn(prod.price_special)
+            price_discounts_mxn = _to_mxn(prod.price_discounts)
             tmpl.write({"list_price": price_list_mxn})
             self._update_template_pricelists_and_cost(tmpl, {
                 "list_price_mxn": price_list_mxn,
                 "special_price_mxn": price_special_mxn,
                 "discount_price_mxn": price_discounts_mxn,
-            }, self.env["ir.config_parameter"].sudo())
+            }, params)
             updated_templates += 1
 
-        self.env["sync.syscom.log"].create({
+        self.env["sync.syscom.log"].sudo().create({
             "name": "Actualización tipo de cambio SYSCOM",
             "kind": "info",
-            "message": "Tasa aplicada: %(rate)s. Productos staging: %(p)s. Plantillas actualizadas: %(t)s" % {
+            "message": "Tasa aplicada: %(rate)s (moneda: %(currency)s). Productos staging: %(p)s. Plantillas actualizadas: %(t)s" % {
                 "rate": exchange_rate,
+                "currency": price_currency,
                 "p": len(products),
                 "t": updated_templates,
             },
@@ -1095,11 +1162,11 @@ class SyscomProduct(models.Model):
             return
 
         try:
-            hours = int(params.get_param("sync_syscom.stock_refresh_hours") or 4)
-        except Exception:
+            hours = float(params.get_param("sync_syscom.stock_refresh_hours") or 4)
+        except (TypeError, ValueError):
             hours = 4
-        if hours < 1:
-            hours = 1
+        if hours < 0:
+            hours = 0
 
         now = fields.Datetime.now()
         last_run = params.get_param("sync_syscom.stock_refresh_last_run")
@@ -1108,7 +1175,7 @@ class SyscomProduct(models.Model):
                 last_dt = fields.Datetime.from_string(last_run)
                 if last_dt and (now - last_dt).total_seconds() < hours * 3600:
                     return
-            except Exception:
+            except (TypeError, ValueError):
                 pass
 
         client = self._get_client()
@@ -1117,9 +1184,10 @@ class SyscomProduct(models.Model):
         rate_payload = client.get_exchange_rate() or {}
         try:
             exchange_rate = float(rate_payload.get("una_semana") or rate_payload.get("normal") or 1.0)
-        except Exception:
+        except (TypeError, ValueError):
             exchange_rate = 1.0
         price_currency = params.get_param("sync_syscom.price_currency") or "usd"
+        min_stock = max(1, int(params.get_param("sync_syscom.min_stock") or 1))
 
         # 1) Refresh staging "selected" (mantener info interna)
         selected = self._get_marked_for_batch()
@@ -1163,14 +1231,32 @@ class SyscomProduct(models.Model):
             except Exception as exc:
                 prod.write({"sync_error": str(exc), "synced_at": now})
 
-        # 2) Refresh product.template publicados (eCommerce)
+        # 2) Refresh product.template publicados (eCommerce) -- POR LOTES
         Template = self.env["product.template"].sudo()
-        domain = [
+
+        try:
+            batch_size = int(params.get_param("sync_syscom.stock_refresh_batch_size") or 200)
+        except (TypeError, ValueError):
+            batch_size = 200
+        if batch_size < 1:
+            batch_size = 200
+
+        try:
+            last_id = int(params.get_param("sync_syscom.stock_refresh_last_id") or 0)
+        except (TypeError, ValueError):
+            last_id = 0
+
+        base_domain = [
             ("syscom_is_product", "=", True),
             ("syscom_product_id", "!=", False),
             ("is_published", "=", True),
         ]
-        templates = Template.search(domain)
+        domain = base_domain + [("id", ">", last_id)]
+        templates = Template.search(domain, order="id", limit=batch_size)
+
+        if not templates:
+            params.set_param("sync_syscom.stock_refresh_last_id", "0")
+            templates = Template.search(base_domain, order="id", limit=batch_size)
 
         for tmpl in templates:
             if not tmpl._has_syscom_vendor():
@@ -1218,11 +1304,19 @@ class SyscomProduct(models.Model):
                 self._apply_extended_values_to_template(tmpl, detail, staging_product=staging_product)
                 # Enforce documents visibility on the website (URLs from SYSCOM resources)
                 self._ensure_template_documents_published(tmpl)
+                stock_ok = stock_new >= min_stock
+                currently_published = getattr(tmpl, "is_published", False)
+                if stock_ok and not currently_published:
+                    self._ensure_template_published_on_website(tmpl)
+                elif not stock_ok and currently_published and "is_published" in tmpl._fields:
+                    tmpl.write({"is_published": False})
                 updated += 1
             except Exception:
                 tmpl.write({"syscom_api_ok": False, "syscom_stock_synced_at": now})
                 failed += 1
 
+        if templates:
+            params.set_param("sync_syscom.stock_refresh_last_id", str(templates[-1].id))
         params.set_param("sync_syscom.stock_refresh_last_run", fields.Datetime.to_string(now))
 
         self.env["sync.syscom.log"].sudo().create({
@@ -1241,8 +1335,11 @@ class SyscomProduct(models.Model):
         token = (params.get_param("sync_syscom.syscom_api_token") or "").strip()
         if not token:
             raise UserError("Configura el token en Ajustes antes de publicar productos.")
-        base_url = params.get_param("sync_syscom.syscom_base_url") or "https://developers.syscom.mx/api/v1"
-        timeout = int(params.get_param("sync_syscom.syscom_timeout") or 30)
+        base_url = params.get_param("sync_syscom.syscom_base_url") or SYSCOM_DEFAULT_BASE_URL
+        try:
+            timeout = int(params.get_param("sync_syscom.syscom_timeout") or SYSCOM_DEFAULT_TIMEOUT)
+        except (TypeError, ValueError):
+            timeout = SYSCOM_DEFAULT_TIMEOUT
         from .syscom_client import SyscomClient
         client = SyscomClient(base_url=base_url, token=token, timeout=timeout)
 
@@ -1255,7 +1352,7 @@ class SyscomProduct(models.Model):
         rate_payload = client.get_exchange_rate() or {}
         try:
             exchange_rate = float(rate_payload.get("una_semana") or rate_payload.get("normal") or 1.0)
-        except Exception:
+        except (TypeError, ValueError):
             exchange_rate = 1.0
         exchange_rate_date = fields.Date.context_today(self)
         min_stock = int(params.get_param("sync_syscom.min_stock") or 1)
@@ -1303,11 +1400,8 @@ class SyscomProduct(models.Model):
                 images_json = detail.get("imágenes") or detail.get("imagenes") or []
                 resources_json = detail.get("recursos") or []
 
-                # Validación de stock mínimo antes de dar de alta/publicar
-                if stock_new < min_stock:
-                    raise UserError(
-                        "Stock insuficiente en SYSCOM (nuevo=%s). Mínimo requerido: %s." % (stock_new, min_stock)
-                    )
+                # Determinar si hay stock suficiente para publicar en eCommerce
+                stock_ok = stock_new >= min_stock
 
                 product_vals = {
                     "name": name,
@@ -1410,7 +1504,10 @@ class SyscomProduct(models.Model):
                 # Imágenes/recursos primero, luego publicar.
                 # (Requerimiento: asegurar que los documentos queden listos antes de que el producto sea visible.)
                 self._sync_template_media_and_resources(template, detail)
-                self._ensure_template_published_on_website(template)
+                if stock_ok:
+                    self._ensure_template_published_on_website(template)
+                else:
+                    product.write({"sync_error": "Sin stock suficiente (nuevo=%s, mínimo=%s) — no publicado en eCommerce." % (stock_new, min_stock)})
 
             except Exception as exc:
                 failed += 1
@@ -1454,6 +1551,7 @@ class SyscomProduct(models.Model):
             "publish_enqueued_at": queued_at,
             "publish_started_at": False,
             "publish_done_at": False,
+            "publish_retry_count": 0,
             "sync_error": False,
         })
 
@@ -1522,6 +1620,19 @@ class SyscomProduct(models.Model):
             },
         }
 
+    def action_start_sync_catalog_models(self):
+        job = self.env["sync.syscom.sync.job"].create_brands_products_job()
+        return {
+            "type": "ir.actions.client",
+            "tag": "display_notification",
+            "params": {
+                "title": "Sync SYSCOM",
+                "message": "Trabajo de sincronización de catálogo de modelos programado: %s." % job.display_name,
+                "type": "success",
+                "sticky": False,
+            },
+        }
+
     def action_start_sync_extended_product_data(self):
         job = self.env["sync.syscom.product.data.job"].create_sync_all_job()
         return {
@@ -1548,19 +1659,60 @@ class SyscomProduct(models.Model):
             },
         }
 
+    def _get_publish_max_retries(self, params=None):
+        """Número máximo de reintentos antes de marcar un producto como 'abandoned'."""
+        from .constants import DEFAULT_PUBLISH_MAX_RETRIES
+        params = params or self.env["ir.config_parameter"].sudo()
+        try:
+            return max(1, int(params.get_param("sync_syscom.publish_max_retries") or DEFAULT_PUBLISH_MAX_RETRIES))
+        except (TypeError, ValueError):
+            return DEFAULT_PUBLISH_MAX_RETRIES
+
+    def action_reset_publish_state(self):
+        """Reinicia el estado de publicación de los productos seleccionados para que se reintenten."""
+        records = self.exists()
+        if not records:
+            raise UserError("Selecciona al menos un producto.")
+        records.write({
+            "publish_state": "pending",
+            "publish_retry_count": 0,
+            "sync_error": False,
+            "publish_enqueued_at": fields.Datetime.now(),
+        })
+        return {
+            "type": "ir.actions.client",
+            "tag": "display_notification",
+            "params": {
+                "title": "Sync SYSCOM",
+                "message": "%s productos reiniciados para publicación." % len(records),
+                "type": "success",
+                "sticky": False,
+            },
+        }
+
     def cron_publish_selected_products(self):
-        """Cron: publica productos pendientes en batches para evitar timeouts."""
+        """Cron: publica productos pendientes en batches para evitar timeouts.
+
+        Reintentos: al fallar, incrementa publish_retry_count.  Cuando supera el
+        máximo configurado (sync_syscom.publish_max_retries) el producto pasa a
+        'abandoned' en lugar de 'error', lo que impide que se vuelva a intentar
+        automáticamente.
+        """
         params = self.env["ir.config_parameter"].sudo()
         try:
-            batch_size = int(params.get_param("sync_syscom.publish_batch_size") or 10)
-        except Exception:
-            batch_size = 10
+            batch_size = int(params.get_param("sync_syscom.publish_batch_size") or DEFAULT_PUBLISH_BATCH_SIZE)
+        except (TypeError, ValueError):
+            batch_size = DEFAULT_PUBLISH_BATCH_SIZE
         if batch_size < 1:
-            batch_size = 10
+            batch_size = DEFAULT_PUBLISH_BATCH_SIZE
 
+        max_retries = self._get_publish_max_retries(params)
+
+        # También reintentar productos en estado 'error' que aún no superaron el límite.
         pending = self.search(
-            [("publish_state", "=", "pending")],
-            order="publish_enqueued_at desc, id desc",
+            [("publish_state", "in", ["pending", "error"]),
+             ("publish_retry_count", "<", max_retries)],
+            order="publish_enqueued_at asc, id asc",
             limit=batch_size,
         )
         if not pending:
@@ -1575,38 +1727,55 @@ class SyscomProduct(models.Model):
 
         ok = 0
         err = 0
+        abandoned = 0
         for prod in pending:
             try:
                 detail = client.get_product_detail(prod.syscom_id) or {}
-                self._publish_one_from_detail(prod, detail, params, exchange_rate, exchange_rate_date, price_currency)
+                _template, _created, low_stock_note = self._publish_one_from_detail(prod, detail, params, exchange_rate, exchange_rate_date, price_currency)
                 prod.write({
                     "publish_state": "done",
                     "publish_done_at": fields.Datetime.now(),
+                    "publish_retry_count": 0,
                     "selected": False,
+                    "sync_error": low_stock_note or False,
                 })
                 ok += 1
             except Exception as exc:
                 err += 1
+                new_retry_count = (prod.publish_retry_count or 0) + 1
+                if new_retry_count >= max_retries:
+                    new_state = "abandoned"
+                    abandoned += 1
+                else:
+                    new_state = "error"
                 prod.write({
-                    "publish_state": "error",
+                    "publish_state": new_state,
                     "publish_done_at": fields.Datetime.now(),
+                    "publish_retry_count": new_retry_count,
                     "sync_error": str(exc),
                 })
                 self.env["sync.syscom.log"].sudo().create({
                     "name": "Error publicación background",
                     "kind": "error",
-                    "message": "%s (%s)" % (prod.name or prod.syscom_id, exc),
+                    "message": "%(label)s – intento %(n)s/%(max)s. Estado: %(state)s. Error: %(err)s." % {
+                        "label": prod.name or prod.syscom_id,
+                        "n": new_retry_count,
+                        "max": max_retries,
+                        "state": new_state,
+                        "err": exc,
+                    },
                 })
                 continue
 
         self.env["sync.syscom.log"].sudo().create({
             "name": "Publicación en background (batch)",
             "kind": "info",
-            "message": "Batch publicado. Modelos: %(products)s. OK: %(ok)s, errores: %(err)s."
+            "message": "Batch publicado. Modelos: %(products)s. OK: %(ok)s, errores: %(err)s, abandonados: %(ab)s."
             % {
                 "products": self._describe_products_for_log(pending),
                 "ok": ok,
                 "err": err,
+                "ab": abandoned,
             },
         })
  

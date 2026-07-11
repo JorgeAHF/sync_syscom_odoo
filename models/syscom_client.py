@@ -2,14 +2,16 @@ from odoo import _
 from odoo.exceptions import UserError
 import requests
 
+from .constants import SYSCOM_DEFAULT_TIMEOUT
+
 
 class SyscomClient:
     DEFAULT_TEST_ENDPOINT = "/categorias"
 
-    def __init__(self, base_url, token, timeout=30):
+    def __init__(self, base_url, token, timeout=SYSCOM_DEFAULT_TIMEOUT):
         self.base_url = (base_url or "").rstrip("/")
         self.token = token or ""
-        self.timeout = timeout or 30
+        self.timeout = timeout or SYSCOM_DEFAULT_TIMEOUT
 
     def ping(self):
         try:
@@ -52,7 +54,7 @@ class SyscomClient:
             "Authorization": f"Bearer {self.token}",
             "Accept": "application/json",
         }
-        timeout_value = timeout_override or self.timeout or 30
+        timeout_value = timeout_override or self.timeout or SYSCOM_DEFAULT_TIMEOUT
         try:
             response = requests.request(
                 method,

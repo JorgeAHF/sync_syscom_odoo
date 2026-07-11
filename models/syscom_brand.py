@@ -4,6 +4,13 @@ from odoo import _, fields, models
 from odoo.exceptions import UserError
 
 from .syscom_client import SyscomClient
+from .constants import (
+    SYSCOM_DEFAULT_BASE_URL,
+    SYSCOM_DEFAULT_TIMEOUT,
+    SYSCOM_BRAND_DETAIL_TIMEOUT,
+    SYSCOM_PAGE_SIZE,
+    SYSCOM_PAGE_LIMIT,
+)
 
 
 class SyscomBrand(models.Model):
@@ -77,8 +84,8 @@ class SyscomBrand(models.Model):
         if not token:
             raise UserError(_("Configura el token en Ajustes antes de sincronizar."))
 
-        base_url = params.get_param("sync_syscom.syscom_base_url") or "https://developers.syscom.mx/api/v1"
-        timeout = int(params.get_param("sync_syscom.syscom_timeout") or 30)
+        base_url = params.get_param("sync_syscom.syscom_base_url") or SYSCOM_DEFAULT_BASE_URL
+        timeout = int(params.get_param("sync_syscom.syscom_timeout") or SYSCOM_DEFAULT_TIMEOUT)
         return SyscomClient(base_url=base_url, token=token, timeout=timeout), params
 
     def action_start_brand_sync(self):
@@ -95,10 +102,16 @@ class SyscomBrand(models.Model):
             },
         }
 
-    def _fetch_all_brand_products(self, client, brand_syscom_id, stock=None, timeout=None, page_limit=200):
-        """
-        Itera paginando /marcas/{id}/productos hasta que no haya resultados o se alcance page_limit.
-        Devuelve lista acumulada y metadatos (paginas, procesadas).
+    def _fetch_all_brand_products(self, client, brand_syscom_id, stock=None, timeout=None, page_limit=SYSCOM_PAGE_LIMIT):
+        """Itera paginando /marcas/{id}/productos hasta agotar resultados o llegar al límite.
+
+        Estrategia de terminación (en orden de prioridad):
+        1. Si la API devuelve ``paginas`` → usarlo como referencia exacta.
+        2. Si la API devuelve ``cantidad`` → detener cuando acumulados >= cantidad.
+        3. Heurística de respaldo: si el batch devuelto tiene menos de SYSCOM_PAGE_SIZE
+           ítems, asumimos que es la última página.
+
+        Devuelve (all_products, pages_done, total_pages, total_count).
         """
         all_products = []
         page = 1
@@ -108,17 +121,34 @@ class SyscomBrand(models.Model):
             products = client.get_brand_products(brand_syscom_id, page=page, stock=stock)
             if not products:
                 break
-            # Algunas respuestas vienen con dict {productos: [...]} si agrupar; contemplamos lista directa.
+            # La API puede devolver lista directa o dict con metadatos de paginación.
             if isinstance(products, dict) and "productos" in products:
                 batch = products.get("productos") or []
-                total_pages = products.get("paginas") or total_pages
-                total_count = products.get("cantidad") or total_count
+                # Actualizar metadatos solo si la API los devuelve (pueden ser None).
+                if products.get("paginas") is not None:
+                    try:
+                        total_pages = int(products["paginas"])
+                    except (TypeError, ValueError):
+                        pass
+                if products.get("cantidad") is not None:
+                    try:
+                        total_count = int(products["cantidad"])
+                    except (TypeError, ValueError):
+                        pass
             else:
                 batch = products or []
             if not batch:
                 break
             all_products.extend(batch)
-            if len(batch) < 60:  # heurística: SYSCOM suele paginar a 60
+
+            # Criterio 1: total de páginas conocido por la API.
+            if total_pages is not None and page >= total_pages:
+                break
+            # Criterio 2: total de ítems conocido por la API.
+            if total_count and len(all_products) >= total_count:
+                break
+            # Criterio 3: heurística — batch incompleto implica última página.
+            if len(batch) < SYSCOM_PAGE_SIZE:
                 break
             page += 1
         return all_products, page - 1, total_pages, total_count
@@ -255,7 +285,7 @@ class SyscomBrand(models.Model):
 
             vals = {
                 "syscom_id": syscom_id,
-                "name": detail.get("titulo") or brand.get("nombre") or syscom_id,
+                "name": brand.get("nombre") or detail.get("titulo") or syscom_id,
                 "title": detail.get("titulo") or brand.get("nombre") or "",
                 "description": detail.get("descripcion") or "",
                 "logo_url": detail.get("logo") or "",
@@ -447,7 +477,7 @@ class SyscomBrand(models.Model):
 
             vals = {
                 "syscom_id": syscom_id,
-                "name": detail.get("titulo") or brand.get("nombre") or syscom_id,
+                "name": brand.get("nombre") or detail.get("titulo") or syscom_id,
                 "title": detail.get("titulo") or brand.get("nombre") or "",
                 "description": detail.get("descripcion") or "",
                 "logo_url": detail.get("logo") or "",
@@ -523,30 +553,34 @@ class SyscomBrand(models.Model):
         return self.action_sync_models_marked()
 
     def action_sync_models_for_brands(self):
-        """Sincroniza modelos para marcas seleccionadas en la vista y categorías marcadas en lote."""
+        """Sincroniza modelos para marcas seleccionadas en la vista.
+
+        Si hay categorías marcadas en lote filtra por ellas; si no, sincroniza
+        todos los modelos de las marcas seleccionadas sin filtro de categoría.
+        """
         categories_selected = self._get_selected_categories()
         selected_cat_ids = set(categories_selected.mapped("syscom_id"))
-        if not selected_cat_ids:
-            raise UserError(_("Marca al menos una categoría en la columna Lote antes de sincronizar modelos."))
 
         brands = self._require_brands_for_view_action("Sincronizar modelos selección vista")
         return self._run_sync_models_action(
             brands,
-            selected_cat_ids,
+            selected_cat_ids or None,
             source_label=_("selección vista"),
         )
 
     def action_sync_models_marked(self):
-        """Sincroniza modelos para marcas y categorías marcadas en lote."""
+        """Sincroniza modelos para marcas marcadas en lote.
+
+        Si hay categorías marcadas en lote filtra por ellas; si no, sincroniza
+        todos los modelos de las marcas marcadas sin filtro de categoría.
+        """
         categories_selected = self._get_selected_categories()
         selected_cat_ids = set(categories_selected.mapped("syscom_id"))
-        if not selected_cat_ids:
-            raise UserError(_("Marca al menos una categoría en la columna Lote antes de sincronizar modelos."))
 
         brands = self._require_marked_brands("Sincronizar modelos marcados en lote")
         return self._run_sync_models_action(
             brands,
-            selected_cat_ids,
+            selected_cat_ids or None,
             source_label=_("marcados en lote"),
         )
 

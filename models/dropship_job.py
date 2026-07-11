@@ -1,5 +1,7 @@
 from odoo import _, api, fields, models
 
+from .constants import DEFAULT_DROPSHIP_BATCH_SIZE
+
 
 class SyncSyscomDropshipJob(models.Model):
     _name = "sync.syscom.dropship.job"
@@ -33,13 +35,13 @@ class SyncSyscomDropshipJob(models.Model):
 
     @classmethod
     def _default_batch_size(cls):
-        return 200
+        return DEFAULT_DROPSHIP_BATCH_SIZE
 
     def _get_batch_size(self):
         params = self.env["ir.config_parameter"].sudo()
         try:
             size = int(params.get_param("sync_syscom.dropship_batch_size") or self._default_batch_size())
-        except Exception:
+        except (TypeError, ValueError):
             size = self._default_batch_size()
         return max(size, 1)
 
@@ -90,11 +92,9 @@ class SyncSyscomDropshipJob(models.Model):
             "finished_at": fields.Datetime.now(),
             "last_error": message,
         })
-        self.env["sync.syscom.log"].sudo().create({
-            "name": _("Trabajo dropshipping con error"),
-            "kind": "error",
-            "message": "%s: %s" % (self.display_name, message),
-        })
+        subject = _("Trabajo dropshipping con error")
+        full_message = "%s: %s" % (self.display_name, message)
+        self.env["sync.syscom.log"].sudo().notify_admin_on_critical_error(subject, full_message)
 
     def _process_batch(self):
         self.ensure_one()

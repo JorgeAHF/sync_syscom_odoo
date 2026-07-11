@@ -5,7 +5,7 @@
     "category": "Sales",
     "author": "Sync Syscom",
     "license": "LGPL-3",
-    "depends": ["base", "product", "stock", "sale", "website_sale"],
+    "depends": ["base", "product", "stock", "sale", "website_sale", "account", "stock_account"],
     "data": [
         "security/security.xml",
         "security/ir.model.access.csv",

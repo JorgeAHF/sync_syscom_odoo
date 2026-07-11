@@ -109,5 +109,16 @@
             <field name="interval_type">minutes</field>
             <field name="active">True</field>
         </record>
+
+        <!-- Purga periódica de logs de sincronización (conserva errores, elimina info/warn antiguos) -->
+        <record id="cron_sync_syscom_purge_logs" model="ir.cron">
+            <field name="name">Sync Syscom: purga de logs</field>
+            <field name="model_id" ref="model_sync_syscom_log"/>
+            <field name="state">code</field>
+            <field name="code">model.cron_purge_old_logs()</field>
+            <field name="interval_number">1</field>
+            <field name="interval_type">weeks</field>
+            <field name="active">True</field>
+        </record>
     </data>
 </odoo>
