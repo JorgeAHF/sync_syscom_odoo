@@ -1249,7 +1249,11 @@ class SyscomProduct(models.Model):
         base_domain = [
             ("syscom_is_product", "=", True),
             ("syscom_product_id", "!=", False),
-            ("is_published", "=", True),
+            # OJO: aqui NO va un filtro por is_published. Con el, un producto que se
+            # despublicaba por falta de stock salia del barrido para siempre y nunca
+            # volvia, aunque SYSCOM recuperara existencia. La logica de rescate ya
+            # existe mas abajo (if stock_ok and not currently_published), pero era
+            # codigo muerto porque este dominio garantizaba lo contrario.
         ]
         domain = base_domain + [("id", ">", last_id)]
         templates = Template.search(domain, order="id", limit=batch_size)
