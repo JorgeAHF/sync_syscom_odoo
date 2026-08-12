@@ -1308,7 +1308,10 @@ class SyscomProduct(models.Model):
                 self._apply_extended_values_to_template(tmpl, detail, staging_product=staging_product)
                 # Enforce documents visibility on the website (URLs from SYSCOM resources)
                 self._ensure_template_documents_published(tmpl)
-                stock_ok = stock_new >= min_stock
+                # Blindaje: si HERGON tiene stock propio en bodega, el producto
+                # no se despublica aunque SYSCOM no alcance el minimo.
+                stock_propio = getattr(tmpl, 'syscom_stock_propio', 0) or 0
+                stock_ok = (stock_new >= min_stock) or (stock_propio > 0)
                 currently_published = getattr(tmpl, "is_published", False)
                 if stock_ok and not currently_published:
                     self._ensure_template_published_on_website(tmpl)

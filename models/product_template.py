@@ -1,6 +1,6 @@
 from html import escape
 
-from odoo import fields, models
+from odoo import api, fields, models
 
 
 class ProductTemplate(models.Model):
@@ -24,9 +24,25 @@ class ProductTemplate(models.Model):
         string="Stock SYSCOM (nuevo)",
         help="Existencia 'nuevo' devuelta por SYSCOM (solo informativo para ecommerce).",
     )
+    syscom_stock_propio = fields.Integer(
+        string="Stock propio HERGON",
+        help="Unidades en bodega de HERGON. Se suman a las de SYSCOM para mostrar "
+             "disponibilidad en la tienda. Si es mayor a 0, el refresco de stock no "
+             "despublica el producto aunque SYSCOM no tenga existencia. La cantidad "
+             "se lleva manualmente: no se descuenta sola al vender.",
+        default=0,
+    )
     syscom_stock_synced_at = fields.Datetime(
         string="Stock SYSCOM actualizado",
     )
+    syscom_stock_total = fields.Integer(
+        string="Disponible total",
+        compute="_compute_syscom_stock_total",
+        store=True,
+        help="Suma del stock de SYSCOM mas el stock propio de HERGON. "
+             "Es la cantidad que se muestra al cliente en la tienda.",
+    )
+
     syscom_api_ok = fields.Boolean(
         string="SYSCOM API OK",
         help="Último estado de validación/refresh contra SYSCOM para este producto.",
@@ -107,3 +123,8 @@ class ProductTemplate(models.Model):
             value = "\n".join("- %s" % line for line in lines)
         self.sudo().write({field_name: value})
         return True
+
+    @api.depends("syscom_stock_new", "syscom_stock_propio")
+    def _compute_syscom_stock_total(self):
+        for registro in self:
+            registro.syscom_stock_total = (registro.syscom_stock_new or 0) + (registro.syscom_stock_propio or 0)
