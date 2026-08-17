@@ -480,6 +480,9 @@ class SyscomCategory(models.Model):
             syscom_id = str(brand.get("id") or "").strip()
             if not syscom_id:
                 continue
+            # Cuenta cada marca revisada, no solo las vinculadas: antes solo
+            # subia en el camino del exito y el limite por lote nunca frenaba.
+            processed += 1
 
             categories = brand.get("categorías") or brand.get("categorias") or []
             detail = None
@@ -512,12 +515,11 @@ class SyscomCategory(models.Model):
 
             brand_vals = {
                 "syscom_id": syscom_id,
-                "name": detail.get("titulo") or brand.get("nombre") or syscom_id,
+                "name": brand.get("nombre") or detail.get("titulo") or syscom_id,
                 "title": detail.get("titulo") or brand.get("nombre") or "",
                 "description": detail.get("descripcion") or "",
                 "logo_url": detail.get("logo") or "",
                 "active": True,
-                "selected": True,
             }
             brand_record = self.env["sync.syscom.brand"].search([("syscom_id", "=", syscom_id)], limit=1)
             if brand_record:
@@ -528,7 +530,6 @@ class SyscomCategory(models.Model):
 
             brand_records |= brand_record
             kept += 1
-            processed += 1
 
         return {
             "kept": kept,
