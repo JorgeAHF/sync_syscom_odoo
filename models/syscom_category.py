@@ -2,8 +2,14 @@ import time
 
 from odoo import _, api, fields, models
 from odoo.exceptions import UserError
+from odoo.tools import format_datetime
 
 from .syscom_client import SyscomClient
+
+# Rutas de menú que se citan en los mensajes de los botones, para que el usuario sepa
+# dónde seguir el trabajo que acaba de encolar.
+MENU_TRABAJOS_SYNC = "SyncSyscom › Sincronizar › Trabajos sync catálogo"
+MENU_TRABAJOS_CATEGORIAS = "SyncSyscom › Sincronizar › Trabajos categorías"
 
 
 class SyscomCategory(models.Model):
@@ -558,6 +564,28 @@ class SyscomCategory(models.Model):
         categories = self._require_marked_categories("Publicar marcadas en lote")
         return self._run_publish_scope_categories(categories, include_children, source_label=_("marcadas en lote"))
 
+    def _etiqueta_seleccion(self, registro, nombre_campo):
+        """Etiqueta que muestra la interfaz para un campo de selección.
+
+        Usa ``_description_selection``, que aplica la traducción del idioma del
+        contexto, en vez de ``.selection``, que devuelve el valor fuente del código.
+        """
+        opciones = dict(registro._fields[nombre_campo]._description_selection(self.env))
+        valor = registro[nombre_campo]
+        return opciones.get(valor, valor)
+
+    def _descripcion_job_existente(self, job, con_etapa=False):
+        """Describe un job que ya estaba en curso: id, estado, etapa y cuándo se creó."""
+        partes = [
+            "#%s" % job.id,
+            _("estado %s") % self._etiqueta_seleccion(job, "state"),
+        ]
+        if con_etapa:
+            partes.append(_("etapa %s") % self._etiqueta_seleccion(job, "stage"))
+        if job.create_date:
+            partes.append(_("creado el %s") % format_datetime(self.env, job.create_date))
+        return ", ".join(partes)
+
     def _run_publish_scope_categories(self, categories, include_children, source_label):
         params = self.env["ir.config_parameter"].sudo()
         if include_children is None:
@@ -567,13 +595,24 @@ class SyscomCategory(models.Model):
             include_children=bool(include_children),
         )
 
+        # create_for_categories nunca reusa: cada clic crea un job nuevo.
+        n_modelos = job.total_products
+        n_cats = len(categories)
         return {
             "type": "ir.actions.client",
             "tag": "display_notification",
             "params": {
                 "title": _("Sync SYSCOM"),
-                "message": _("Trabajo de publicación por categoría programado desde %(source)s: %(job)s.")
-                % {"source": source_label, "job": job.display_name},
+                "message": _(
+                    "Trabajo de publicación #%(id)s creado: %(modelos)s de %(cats)s, "
+                    "%(alcance)s. Síguelo en %(menu)s."
+                ) % {
+                    "id": job.id,
+                    "modelos": _("1 modelo") if n_modelos == 1 else _("%s modelos") % n_modelos,
+                    "cats": _("1 categoría") if n_cats == 1 else _("%s categorías") % n_cats,
+                    "alcance": _("subcategorías incluidas") if include_children else _("sin subcategorías"),
+                    "menu": MENU_TRABAJOS_CATEGORIAS,
+                },
                 "type": "success",
                 "sticky": False,
             },
@@ -582,14 +621,29 @@ class SyscomCategory(models.Model):
     def action_sync_categories_and_brands(self):
         """Programa sincronización completa en background."""
         job = self.env["sync.syscom.sync.job"].create_full_catalog_job()
+        if job.env.context.get("sync_syscom_job_creado", True):
+            mensaje = _(
+                "Trabajo #%(id)s creado: catálogo completo (categorías, marcas y "
+                "modelos). Síguelo en %(menu)s."
+            ) % {"id": job.id, "menu": MENU_TRABAJOS_SYNC}
+            tipo, pegajoso = "success", False
+        else:
+            mensaje = _(
+                "Ya había un trabajo de catálogo completo en curso: %(detalle)s. "
+                "No se creó otro. Síguelo en %(menu)s."
+            ) % {
+                "detalle": self._descripcion_job_existente(job, con_etapa=True),
+                "menu": MENU_TRABAJOS_SYNC,
+            }
+            tipo, pegajoso = "warning", True
         return {
             "type": "ir.actions.client",
             "tag": "display_notification",
             "params": {
                 "title": _("Sync SYSCOM"),
-                "message": _("Trabajo de sincronización completa programado: %s.") % job.display_name,
-                "type": "success",
-                "sticky": False,
+                "message": mensaje,
+                "type": tipo,
+                "sticky": pegajoso,
             },
         }
 
@@ -599,14 +653,28 @@ class SyscomCategory(models.Model):
 
     def action_start_category_sync(self):
         job = self.env["sync.syscom.sync.job"].create_categories_only_job()
+        if job.env.context.get("sync_syscom_job_creado", True):
+            mensaje = _(
+                "Trabajo #%(id)s creado: sincronización de categorías. Síguelo en %(menu)s."
+            ) % {"id": job.id, "menu": MENU_TRABAJOS_SYNC}
+            tipo, pegajoso = "success", False
+        else:
+            mensaje = _(
+                "Ya había un trabajo de categorías en curso: %(detalle)s. "
+                "No se creó otro. Síguelo en %(menu)s."
+            ) % {
+                "detalle": self._descripcion_job_existente(job),
+                "menu": MENU_TRABAJOS_SYNC,
+            }
+            tipo, pegajoso = "warning", True
         return {
             "type": "ir.actions.client",
             "tag": "display_notification",
             "params": {
                 "title": _("Sync SYSCOM"),
-                "message": _("Trabajo de sincronización de categorías programado: %s.") % job.display_name,
-                "type": "success",
-                "sticky": False,
+                "message": mensaje,
+                "type": tipo,
+                "sticky": pegajoso,
             },
         }
 

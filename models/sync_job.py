@@ -90,13 +90,22 @@ class SyncSyscomSyncJob(models.Model):
 
     @api.model
     def _create_job(self, job_type, name):
+        """Devuelve el job, creándolo solo si no hay otro del mismo tipo en curso.
+
+        El recordset devuelto viene marcado con la clave de contexto
+        ``sync_syscom_job_creado``: True si se acaba de crear, False si se reusó uno
+        que ya existía.  Se pasa por contexto y no como segundo valor de retorno para
+        no romper a los llamadores que solo esperan el recordset (Marcas y Modelos).
+        Quien necesite distinguir los dos casos lee
+        ``job.env.context.get("sync_syscom_job_creado")``.
+        """
         existing = self.search(
             [("job_type", "=", job_type), ("state", "in", ["pending", "running"])],
             order="create_date asc",
             limit=1,
         )
         if existing:
-            return existing
+            return existing.with_context(sync_syscom_job_creado=False)
 
         job = self.create({
             "name": name,
@@ -111,7 +120,7 @@ class SyncSyscomSyncJob(models.Model):
                 "type": dict(self._fields["job_type"].selection).get(job.job_type),
             },
         })
-        return job
+        return job.with_context(sync_syscom_job_creado=True)
 
     @api.model
     def create_categories_only_job(self):
