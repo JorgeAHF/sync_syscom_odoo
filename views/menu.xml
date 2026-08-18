@@ -37,9 +37,9 @@ action = env["sync.syscom.category"].action_start_sync_pipeline()
         />
         <menuitem
             id="menu_sync_syscom_sync_all"
-            name="Categorías/Marcas/Modelos"
+            name="Actualizar categorías, marcas y modelos"
             parent="menu_sync_syscom_sync"
-            action="server_action_sync_cat_brand_models"
+            action="server_action_sync_cat_brand"
             groups="sync_syscom.group_sync_syscom_manager"
         />
         <menuitem
@@ -86,11 +86,10 @@ action = env["sync.syscom.category"].action_start_sync_pipeline()
         />
         <menuitem
             id="menu_sync_syscom_sync_categories"
-            name="Sync Categorías"
+            name="Actualizar árbol de categorías"
             parent="menu_sync_syscom_sync"
             action="server_action_sync_syscom_category"
             groups="sync_syscom.group_sync_syscom_manager"
-            active="False"
         />
         <menuitem
             id="menu_sync_syscom_sync_brands"
@@ -142,6 +141,14 @@ action = env["sync.syscom.category"].action_start_sync_pipeline()
             name="Logs"
             parent="menu_sync_syscom_root"
             action="action_sync_syscom_log"
+            groups="sync_syscom.group_sync_syscom_manager"
+        />
+        <menuitem
+            id="menu_sync_syscom_fix_accounting"
+            name="Corregir cuentas contables"
+            parent="menu_sync_syscom_root"
+            action="server_action_fix_accounting_accounts"
+            sequence="30"
             groups="sync_syscom.group_sync_syscom_manager"
         />
 

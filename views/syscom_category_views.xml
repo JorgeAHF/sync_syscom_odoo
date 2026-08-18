@@ -92,23 +92,10 @@ action = env["sync.syscom.category"].action_fix_accounting_accounts()
                 <list string="Categorías SYSCOM">
                     <header>
                         <button
-                            name="%(server_action_sync_syscom_category)d"
-                            type="action"
-                            string="Actualizar árbol de categorías"
-                            class="btn-secondary"
-                            groups="sync_syscom.group_sync_syscom_manager"
-                        />
-                        <button
-                            name="%(server_action_sync_cat_brand)d"
-                            type="action"
-                            string="Actualizar categorías y sus marcas"
-                            class="btn-primary"
-                            groups="sync_syscom.group_sync_syscom_manager"
-                        />
-                        <button
                             name="%(server_action_sync_brands_selected)d"
                             type="action"
                             string="Ver qué marcas hay en lo seleccionado"
+                            title="Consulta SYSCOM y vincula las marcas de las categorías seleccionadas en esta lista. No toca la tienda: escribe solo en el catálogo local. Procesa un lote por clic."
                             class="btn-secondary"
                             groups="sync_syscom.group_sync_syscom_manager"
                         />
@@ -116,14 +103,8 @@ action = env["sync.syscom.category"].action_fix_accounting_accounts()
                             name="%(server_action_publish_categories_with_children)d"
                             type="action"
                             string="Publicar lo seleccionado (incluye subcategorías)"
+                            title="Publica los modelos de las categorías seleccionadas en esta lista y de todas sus subcategorías. Sí afecta la tienda."
                             class="btn-primary"
-                            groups="sync_syscom.group_sync_syscom_manager"
-                        />
-                        <button
-                            name="%(server_action_fix_accounting_accounts)d"
-                            type="action"
-                            string="Corregir cuentas contables"
-                            class="btn-secondary"
                             groups="sync_syscom.group_sync_syscom_manager"
                         />
                     </header>
@@ -147,6 +128,7 @@ action = env["sync.syscom.category"].action_fix_accounting_accounts()
                             name="%(server_action_publish_categories_with_children)d"
                             type="action"
                             string="Publicar esta categoría y sus subcategorías"
+                            title="Publica los modelos de esta categoría y de todas sus subcategorías, que pueden ser muchas. Sí afecta la tienda."
                             class="btn-primary"
                             groups="sync_syscom.group_sync_syscom_manager"
                         />
@@ -154,6 +136,7 @@ action = env["sync.syscom.category"].action_fix_accounting_accounts()
                             name="%(server_action_publish_categories_only)d"
                             type="action"
                             string="Publicar solo esta categoría"
+                            title="Publica solo los modelos de esta categoría, sin subcategorías. Sí afecta la tienda."
                             class="btn-secondary"
                             groups="sync_syscom.group_sync_syscom_manager"
                         />
