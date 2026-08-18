@@ -4,7 +4,6 @@
         <record id="server_action_sync_brands_selected" model="ir.actions.server">
             <field name="name">Ver qué marcas hay en lo seleccionado</field>
             <field name="model_id" ref="model_sync_syscom_category"/>
-            <field name="binding_model_id" ref="model_sync_syscom_category"/>
             <field name="binding_type">action</field>
             <field name="state">code</field>
             <field name="code">
@@ -77,7 +76,6 @@ action = env["sync.syscom.category"].action_publish_marked_categories(include_ch
         <record id="server_action_fix_accounting_accounts" model="ir.actions.server">
             <field name="name">Corregir cuentas contables SYSCOM</field>
             <field name="model_id" ref="model_sync_syscom_category"/>
-            <field name="binding_model_id" ref="model_sync_syscom_category"/>
             <field name="binding_type">action</field>
             <field name="state">code</field>
             <field name="code">
@@ -185,11 +183,11 @@ action = env["sync.syscom.category"].action_fix_accounting_accounts()
             </field>
         </record>
 
-        <!-- Acción en menú "Acción" del formulario/lista -->
+        <!-- Sin binding_model_id: se invoca desde el menú SyncSyscom > Sincronizar,
+             no desde el menú Acciones de la lista. -->
         <record id="server_action_sync_syscom_category" model="ir.actions.server">
             <field name="name">Actualizar árbol de categorías</field>
             <field name="model_id" ref="model_sync_syscom_category"/>
-            <field name="binding_model_id" ref="model_sync_syscom_category"/>
             <field name="binding_type">action</field>
             <field name="state">code</field>
             <field name="code">
@@ -200,7 +198,6 @@ action = env["sync.syscom.category"].action_start_category_sync()
         <record id="server_action_sync_cat_brand" model="ir.actions.server">
             <field name="name">Actualizar categorías y sus marcas</field>
             <field name="model_id" ref="model_sync_syscom_category"/>
-            <field name="binding_model_id" ref="model_sync_syscom_category"/>
             <field name="binding_type">action</field>
             <field name="state">code</field>
             <field name="code">

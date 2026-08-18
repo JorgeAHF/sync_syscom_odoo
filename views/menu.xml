@@ -11,10 +11,12 @@
             <field name="context">{'module': 'sync_syscom'}</field>
         </record>
 
+        <!-- Huérfana: ningún menú la usa desde que menu_sync_syscom_sync_all apunta a
+             server_action_sync_cat_brand. Se le quitó el binding_model_id porque
+             aparecía en el menú Acciones de la lista de Usuarios de Odoo. -->
         <record id="server_action_sync_cat_brand_models" model="ir.actions.server">
             <field name="name">Sincronizar categorías, marcas y modelos</field>
             <field name="model_id" ref="base.model_res_users"/>
-            <field name="binding_model_id" ref="base.model_res_users"/>
             <field name="binding_type">action</field>
             <field name="state">code</field>
             <field name="code">
