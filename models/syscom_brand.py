@@ -124,6 +124,10 @@ class SyscomBrand(models.Model):
         """
         all_products = []
         page = 1
+        # Se cuenta al consumir, no al salir: los tres `break` de abajo ocurren DESPUÉS
+        # de haber usado la página, así que deducirlo de `page` al final reportaba una
+        # página de menos en todas las salidas por criterio de terminación.
+        pages_done = 0
         total_pages = None
         total_count = 0
         while page <= page_limit:
@@ -149,6 +153,7 @@ class SyscomBrand(models.Model):
             if not batch:
                 break
             all_products.extend(batch)
+            pages_done += 1
 
             # Criterio 1: total de páginas conocido por la API.
             if total_pages is not None and page >= total_pages:
@@ -160,7 +165,7 @@ class SyscomBrand(models.Model):
             if len(batch) < SYSCOM_PAGE_SIZE:
                 break
             page += 1
-        return all_products, page - 1, total_pages, total_count
+        return all_products, pages_done, total_pages, total_count
 
     def _sync_brand_products_for_brand(self, client, brand_record, params):
         """Crea/actualiza stubs de productos y vincula categorías para una marca."""
