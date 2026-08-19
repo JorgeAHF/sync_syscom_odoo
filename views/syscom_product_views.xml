@@ -67,6 +67,19 @@
             </field>
         </record>
 
+        <!-- Sin binding_model_id a propósito: se usa solo desde el botón de la lista,
+             no debe aparecer en el menú Acciones. Patrón de
+             server_action_publish_syscom_products_marked. -->
+        <record id="server_action_reset_publish_state" model="ir.actions.server">
+            <field name="name">Reiniciar estado de publicación</field>
+            <field name="model_id" ref="model_sync_syscom_product"/>
+            <field name="binding_type">action</field>
+            <field name="state">code</field>
+            <field name="code">
+                action = records.action_reset_publish_state()
+            </field>
+        </record>
+
         <record id="view_sync_syscom_product_tree" model="ir.ui.view">
             <field name="name">sync.syscom.product.list</field>
             <field name="model">sync.syscom.product</field>
@@ -107,6 +120,14 @@
                             string="Publicar lo seleccionado en la tienda"
                             class="btn-primary"
                             groups="sync_syscom.group_sync_syscom_manager"
+                        />
+                        <button
+                            name="%(server_action_reset_publish_state)d"
+                            type="action"
+                            string="Reiniciar estado de publicación"
+                            class="btn-secondary"
+                            groups="sync_syscom.group_sync_syscom_manager"
+                            title="Devuelve a la cola de publicación los modelos seleccionados en esta lista, poniendo su contador de reintentos en cero y borrando su último error. Es el único camino para reintentar un modelo abandonado, porque publicar por marca ya no los toca."
                         />
                     </header>
                     <field name="name"/>
