@@ -1,11 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
     <data>
-        <!-- Server action declared before being referenced -->
+        <!-- Server action declared before being referenced.
+
+             Ninguna de estas acciones lleva binding_model_id: todas tienen su propio
+             botón en la barra de la lista, y el binding las duplicaba en el menú
+             Acciones. Si vuelves a añadirlo, reaparece el duplicado. -->
         <record id="server_action_publish_syscom_products" model="ir.actions.server">
             <field name="name">Publicar lo seleccionado en la tienda</field>
             <field name="model_id" ref="model_sync_syscom_product"/>
-            <field name="binding_model_id" ref="model_sync_syscom_product"/>
             <field name="binding_type">action</field>
             <field name="state">code</field>
             <field name="code">
@@ -26,7 +29,6 @@
         <record id="server_action_recompute_syscom_costs" model="ir.actions.server">
             <field name="name">Recalcular costos SYSCOM</field>
             <field name="model_id" ref="model_sync_syscom_product"/>
-            <field name="binding_model_id" ref="model_sync_syscom_product"/>
             <field name="binding_type">action</field>
             <field name="state">code</field>
             <field name="code">
@@ -37,7 +39,6 @@
         <record id="server_action_configure_syscom_dropshipping" model="ir.actions.server">
             <field name="name">Configurar dropshipping SYSCOM</field>
             <field name="model_id" ref="model_sync_syscom_product"/>
-            <field name="binding_model_id" ref="model_sync_syscom_product"/>
             <field name="binding_type">action</field>
             <field name="state">code</field>
             <field name="code">
@@ -48,7 +49,6 @@
         <record id="server_action_sync_catalog_models" model="ir.actions.server">
             <field name="name">Traer modelos nuevos de SYSCOM</field>
             <field name="model_id" ref="model_sync_syscom_product"/>
-            <field name="binding_model_id" ref="model_sync_syscom_product"/>
             <field name="binding_type">action</field>
             <field name="state">code</field>
             <field name="code">
@@ -59,7 +59,6 @@
         <record id="server_action_sync_extended_product_data" model="ir.actions.server">
             <field name="name">Actualizar datos extendidos SYSCOM</field>
             <field name="model_id" ref="model_sync_syscom_product"/>
-            <field name="binding_model_id" ref="model_sync_syscom_product"/>
             <field name="binding_type">action</field>
             <field name="state">code</field>
             <field name="code">
@@ -67,9 +66,6 @@
             </field>
         </record>
 
-        <!-- Sin binding_model_id a propósito: se usa solo desde el botón de la lista,
-             no debe aparecer en el menú Acciones. Patrón de
-             server_action_publish_syscom_products_marked. -->
         <record id="server_action_reset_publish_state" model="ir.actions.server">
             <field name="name">Reiniciar estado de publicación</field>
             <field name="model_id" ref="model_sync_syscom_product"/>
