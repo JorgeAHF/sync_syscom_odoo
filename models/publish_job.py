@@ -166,10 +166,12 @@ class SyncSyscomPublishJob(models.Model):
         chunk_limit = self._get_product_chunk_limit()
         batch_products = products[offset : offset + chunk_limit]
         batch_processed = len(batch_products)
-        queued = product_model.queue_products_for_background_publish(
+        encolado = product_model.queue_products_for_background_publish(
             batch_products,
             source_label=self._job_source_label,
-        ) if batch_products else 0
+        ) if batch_products else {"recibidos": 0, "encolados": 0, "omitidos_abandonados": 0}
+        queued = encolado["encolados"]
+        omitidos = encolado["omitidos_abandonados"]
 
         next_offset = offset + batch_processed
         done = next_offset >= total
@@ -182,13 +184,15 @@ class SyncSyscomPublishJob(models.Model):
 
         self.env["sync.syscom.log"].sudo().create({
             "name": _("Trabajo publicación categorías (batch)"),
-            "kind": "info",
+            "kind": "warn" if omitidos else "info",
             "message": _(
-                "Job %(job)s batch. Productos revisados: %(processed)s, en cola: %(queued)s. Offset: %(offset)s/%(total)s."
+                "Job %(job)s batch. Productos revisados: %(processed)s, en cola: %(queued)s, "
+                "omitidos por abandonados: %(omitidos)s. Offset: %(offset)s/%(total)s."
             ) % {
                 "job": self.display_name,
                 "processed": batch_processed,
                 "queued": queued,
+                "omitidos": omitidos,
                 "offset": 0 if done else next_offset,
                 "total": total,
             },

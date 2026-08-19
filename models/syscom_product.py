@@ -1547,72 +1547,111 @@ class SyscomProduct(models.Model):
         }
 
     def queue_products_for_background_publish(self, products, source_label=None):
-        """Queue products for background publication."""
-        products = products.exists()
-        if not products:
-            return 0
+        """Encola productos para publicación en background.
 
-        queued_at = fields.Datetime.now()
-        products.write({
+        Encolar un ALCANCE (una marca, unas categorías) no es lo mismo que reintentar
+        un fallo. Este método hace lo primero, así que no toca el historial de fallos:
+
+        - No limpia ``sync_error`` ni las fechas de intento. El desenlace los reescribe
+          igual —``cron_publish_selected_products`` escribe ``sync_error`` tanto al
+          publicar como al fallar—, así que limpiarlos aquí no aporta nada y destruye
+          el diagnóstico durante toda la ventana hasta que el cron llegue. Con el cron
+          apagado esa ventana son meses.
+        - No toca ``publish_retry_count``: es lo único con semántica real, gobierna el
+          dominio del cron. Un producto en ``error`` con 2 intentos conserva su cuenta
+          y le queda uno; ponerla en 0 le daría reintentos infinitos.
+        - Omite los ``abandoned``: ese estado significa que el sistema se rindió a
+          propósito tras agotar los reintentos. Resucitarlos sin que nadie lo pida
+          reabre el gasto de cuota que ya se quemó una vez.
+
+        El reintento deliberado tiene su propio camino y ahí sí limpia todo:
+        ``action_reset_publish_state``.
+
+        Devuelve un dict con ``recibidos``, ``encolados`` y ``omitidos_abandonados``.
+        """
+        products = products.exists()
+        recibidos = len(products)
+        abandonados = products.filtered(lambda prod: prod.publish_state == "abandoned")
+        encolables = products - abandonados
+        resultado = {
+            "recibidos": recibidos,
+            "encolados": len(encolables),
+            "omitidos_abandonados": len(abandonados),
+        }
+        if not encolables:
+            return resultado
+
+        encolables.write({
             "publish_state": "pending",
-            "publish_enqueued_at": queued_at,
-            "publish_started_at": False,
-            "publish_done_at": False,
-            "publish_retry_count": 0,
-            "sync_error": False,
+            "publish_enqueued_at": fields.Datetime.now(),
         })
 
         source = source_label or "selección manual"
+        mensaje = "Se programó la publicación de %(count)s productos. Origen: %(source)s. Modelos: %(products)s." % {
+            "count": len(encolables),
+            "source": source,
+            "products": self._describe_products_for_log(encolables),
+        }
+        if abandonados:
+            mensaje += (
+                "\nOmitidos por estado abandonado: %s. No se reintentan desde un encolado por alcance; "
+                "para reintentarlos, selecciónalos y usa 'Reiniciar estado de publicación'." % len(abandonados)
+            )
         self.env["sync.syscom.log"].sudo().create({
             "name": "Publicación en background (inicio)",
-            "kind": "info",
-            "message": "Se programó la publicación de %(count)s productos. Origen: %(source)s. Modelos: %(products)s."
-            % {
-                "count": len(products),
-                "source": source,
-                "products": self._describe_products_for_log(products),
-            },
+            "kind": "warn" if abandonados else "info",
+            "message": mensaje,
         })
-        return len(products)
+        return resultado
 
     def action_start_publish_selected_background(self):
         """Compatibilidad: usa el modo explícito de marcados en lote."""
         return self.action_start_publish_marked_background()
 
+    def _notificacion_encolado(self, resultado, origen):
+        """Notificación común de los botones que encolan publicación por alcance."""
+        if resultado["encolados"]:
+            mensaje = "Publicación iniciada en segundo plano para %s (%s productos)." % (
+                origen,
+                resultado["encolados"],
+            )
+        else:
+            mensaje = "No se encoló nada para %s." % origen
+        if resultado["omitidos_abandonados"]:
+            mensaje += (
+                " Se omitieron %s productos abandonados: agotaron sus reintentos y no se resucitan"
+                " desde aquí. Para reintentarlos, selecciónalos y usa 'Reiniciar estado de publicación'."
+                % resultado["omitidos_abandonados"]
+            )
+        # Aviso pegajoso si no se encoló nada o si se omitió algo: son los dos casos en
+        # los que el usuario tiene que enterarse de que su clic no hizo lo que creía.
+        alerta = not resultado["encolados"] or bool(resultado["omitidos_abandonados"])
+        return {
+            "type": "ir.actions.client",
+            "tag": "display_notification",
+            "params": {
+                "title": "Sync SYSCOM",
+                "message": mensaje,
+                "type": "warning" if alerta else "success",
+                "sticky": alerta,
+            },
+        }
+
     def action_start_publish_records_background(self):
         products = self._require_records_for_view_action("Publicar selección vista")
-        queued = self.queue_products_for_background_publish(
+        resultado = self.queue_products_for_background_publish(
             products,
             source_label="Selección vista (%s)" % ", ".join(products.mapped("syscom_id")),
         )
-        return {
-            "type": "ir.actions.client",
-            "tag": "display_notification",
-            "params": {
-                "title": "Sync SYSCOM",
-                "message": "Publicación iniciada en segundo plano para la selección vista (%s productos)." % queued,
-                "type": "success",
-                "sticky": False,
-            },
-        }
+        return self._notificacion_encolado(resultado, "la selección vista")
 
     def action_start_publish_marked_background(self):
         products = self._require_marked_for_batch("Publicar marcados en lote")
-        queued = self.queue_products_for_background_publish(
+        resultado = self.queue_products_for_background_publish(
             products,
             source_label="Marcados en lote (%s)" % ", ".join(products.mapped("syscom_id")),
         )
-
-        return {
-            "type": "ir.actions.client",
-            "tag": "display_notification",
-            "params": {
-                "title": "Sync SYSCOM",
-                "message": "Publicación iniciada en segundo plano para marcados en lote (%s productos)." % queued,
-                "type": "success",
-                "sticky": False,
-            },
-        }
+        return self._notificacion_encolado(resultado, "marcados en lote")
 
     def action_start_recompute_syscom_costs(self):
         job = self.env["sync.syscom.cost.job"].create_recompute_all_job()

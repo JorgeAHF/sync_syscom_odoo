@@ -951,36 +951,67 @@ class SyscomBrand(models.Model):
 
     def _run_publish_scope_brands(self, brands, source_label):
         stats = self._sync_models_for_brands(brands, allowed_category_syscom_ids=None)
-        queued = self.env["sync.syscom.product"].queue_products_for_background_publish(
+        encolado = self.env["sync.syscom.product"].queue_products_for_background_publish(
             stats["products"],
             source_label="Marcas %s (%s)" % (source_label, ", ".join(brands.mapped("syscom_id"))),
         )
-        if not queued:
-            raise UserError(_("No se encontraron productos para publicar en las marcas indicadas."))
+        marcas_label = self._etiqueta_marcas(brands)
+        omitidos = encolado["omitidos_abandonados"]
+        encolados = encolado["encolados"]
 
         self.env["sync.syscom.log"].sudo().create({
-            "name": _("Publicación por marcas (programada)"),
-            "kind": "info",
-            "message": _("Origen: %(source)s. Marcas: %(brands)s. Modelos sync: %(kept)s (creados %(created)s, actualizados %(updated)s). En cola: %(queued)s.")
+            "name": _("Publicación por marcas: %s") % marcas_label,
+            "kind": "warn" if (not encolados or omitidos) else "info",
+            "message": _(
+                "Origen: %(source)s. Marcas: %(brands)s. La API devolvió %(traidos)s; modelos sync: "
+                "%(kept)s (creados %(created)s, actualizados %(updated)s). En cola: %(queued)s. "
+                "Omitidos por abandonados: %(omitidos)s."
+            )
             % {
                 "source": source_label,
                 "brands": ", ".join(brands.mapped("syscom_id")),
+                "traidos": stats["traidos"],
                 "kept": stats["kept"],
                 "created": stats["created"],
                 "updated": stats["updated"],
-                "queued": queued,
+                "queued": encolados,
+                "omitidos": omitidos,
             },
         })
+
+        # Antes esto era un `raise UserError` cuando no se encolaba nada. La excepción
+        # revertía el sync que se acababa de hacer —cuota gastada, cero escrito, ni el
+        # log— que es el mismo modo de falla del 429. Ahora avisa sin tirar el trabajo.
+        if encolados:
+            mensaje = _("Publicación por marca iniciada en segundo plano desde %(source)s. En cola: %(queued)s.") % {
+                "source": source_label,
+                "queued": encolados,
+            }
+        elif stats["traidos"]:
+            mensaje = _(
+                "No se encoló nada para %(marcas)s. La API devolvió %(traidos)s productos y se "
+                "sincronizaron %(kept)s, pero ninguno quedó publicable."
+            ) % {"marcas": marcas_label, "traidos": stats["traidos"], "kept": stats["kept"]}
+        else:
+            mensaje = _("La API no devolvió productos para %(marcas)s. No se encoló nada.") % {
+                "marcas": marcas_label,
+            }
+        if omitidos:
+            mensaje += _(
+                " Se omitieron %s productos abandonados: agotaron sus reintentos y no se resucitan"
+                " desde aquí. Para reintentarlos, selecciónalos en Modelos y usa 'Reiniciar estado"
+                " de publicación'."
+            ) % omitidos
+        alerta = not encolados or bool(omitidos)
 
         return {
             "type": "ir.actions.client",
             "tag": "display_notification",
             "params": {
                 "title": _("Sync SYSCOM"),
-                "message": _("Publicación por marca iniciada en segundo plano desde %(source)s. En cola: %(queued)s.")
-                % {"source": source_label, "queued": queued},
-                "type": "success",
-                "sticky": False,
+                "message": mensaje,
+                "type": "warning" if alerta else "success",
+                "sticky": alerta,
             },
         }
 
