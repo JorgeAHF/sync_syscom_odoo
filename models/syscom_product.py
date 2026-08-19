@@ -1,6 +1,15 @@
-from odoo import fields, models
+from odoo import _, fields, models
 from odoo.exceptions import UserError
 from urllib.parse import urlparse, urlunparse
+
+from .job_feedback import (
+    CRON_PUBLICAR,
+    MENU_TRABAJOS_COSTOS,
+    MENU_TRABAJOS_DATOS,
+    MENU_TRABAJOS_DROPSHIP,
+    MENU_TRABAJOS_PUBLICACION,
+    MENU_TRABAJOS_SYNC,
+)
 
 from .constants import (
     SYSCOM_DEFAULT_BASE_URL,
@@ -13,6 +22,7 @@ from .constants import (
 
 class SyscomProduct(models.Model):
     _name = "sync.syscom.product"
+    _inherit = ["sync.syscom.job.feedback"]
     _description = "Producto SYSCOM (staging)"
     _order = "model"
 
@@ -1608,29 +1618,78 @@ class SyscomProduct(models.Model):
         """Compatibilidad: usa el modo explícito de marcados en lote."""
         return self.action_start_publish_marked_background()
 
-    def _notificacion_encolado(self, resultado, origen):
-        """Notificación común de los botones que encolan publicación por alcance."""
-        if resultado["encolados"]:
-            mensaje = "Publicación iniciada en segundo plano para %s (%s productos)." % (
-                origen,
-                resultado["encolados"],
-            )
+    def _notificacion_job(self, job, descripcion, menu, con_etapa=False, nombre_corto=None):
+        """Notificación de los botones que crean un job: ID real, nuevo o reusado, y menú.
+
+        ``descripcion`` es qué hace el job ("sincronización de catálogo de modelos");
+        ``nombre_corto`` es cómo se le llama al hablar de uno que ya existe ("catálogo de
+        modelos"), porque "Ya había un trabajo de sincronización de..." se lee mal.
+        Ambos en minúsculas y sin punto final.
+        """
+        if job.env.context.get("sync_syscom_job_creado", True):
+            mensaje = _("Trabajo #%(id)s creado: %(que)s. Síguelo en %(menu)s.") % {
+                "id": job.id,
+                "que": descripcion,
+                "menu": menu,
+            }
+            tipo, pegajoso = "success", False
         else:
-            mensaje = "No se encoló nada para %s." % origen
-        if resultado["omitidos_abandonados"]:
-            mensaje += (
-                " Se omitieron %s productos abandonados: agotaron sus reintentos y no se resucitan"
-                " desde aquí. Para reintentarlos, selecciónalos y usa 'Reiniciar estado de publicación'."
-                % resultado["omitidos_abandonados"]
-            )
-        # Aviso pegajoso si no se encoló nada o si se omitió algo: son los dos casos en
-        # los que el usuario tiene que enterarse de que su clic no hizo lo que creía.
-        alerta = not resultado["encolados"] or bool(resultado["omitidos_abandonados"])
+            mensaje = _(
+                "Ya había un trabajo de %(que)s en curso: %(detalle)s. No se creó otro. "
+                "Síguelo en %(menu)s."
+            ) % {
+                "que": nombre_corto or descripcion,
+                "detalle": self._descripcion_job_existente(job, con_etapa=con_etapa),
+                "menu": menu,
+            }
+            tipo, pegajoso = "warning", True
         return {
             "type": "ir.actions.client",
             "tag": "display_notification",
             "params": {
-                "title": "Sync SYSCOM",
+                "title": _("Sync SYSCOM"),
+                "message": mensaje,
+                "type": tipo,
+                "sticky": pegajoso,
+            },
+        }
+
+    def _texto_cola_publicacion(self):
+        """Coletilla común: quién publica lo encolado y dónde verlo.
+
+        Estos botones no crean job, así que no hay ID que citar ni ficha que abrir. El
+        cron responsable es el único dato que explica por qué "no pasa nada" si está
+        apagado.
+        """
+        return _(
+            "Los publica en segundo plano el cron '%(cron)s'; míralos en %(menu)s, "
+            "filtro Pendientes."
+        ) % {"cron": CRON_PUBLICAR, "menu": MENU_TRABAJOS_PUBLICACION}
+
+    def _notificacion_encolado(self, resultado, origen):
+        """Notificación común de los botones que encolan publicación por alcance."""
+        encolados = resultado["encolados"]
+        if encolados:
+            mensaje = _("%(n)s de %(origen)s en cola para publicar. ") % {
+                "n": _("1 modelo") if encolados == 1 else _("%s modelos") % encolados,
+                "origen": origen,
+            } + self._texto_cola_publicacion()
+        else:
+            # Sin nada en cola no se cita el menú: mandar a una lista vacía no ayuda.
+            mensaje = _("No se encoló nada para %s.") % origen
+        if resultado["omitidos_abandonados"]:
+            mensaje += _(
+                " Se omitieron %s productos abandonados: agotaron sus reintentos y no se resucitan"
+                " desde aquí. Para reintentarlos, selecciónalos y usa 'Reiniciar estado de publicación'."
+            ) % resultado["omitidos_abandonados"]
+        # Aviso pegajoso si no se encoló nada o si se omitió algo: son los dos casos en
+        # los que el usuario tiene que enterarse de que su clic no hizo lo que creía.
+        alerta = not encolados or bool(resultado["omitidos_abandonados"])
+        return {
+            "type": "ir.actions.client",
+            "tag": "display_notification",
+            "params": {
+                "title": _("Sync SYSCOM"),
                 "message": mensaje,
                 "type": "warning" if alerta else "success",
                 "sticky": alerta,
@@ -1643,7 +1702,7 @@ class SyscomProduct(models.Model):
             products,
             source_label="Selección vista (%s)" % ", ".join(products.mapped("syscom_id")),
         )
-        return self._notificacion_encolado(resultado, "la selección vista")
+        return self._notificacion_encolado(resultado, _("la selección vista"))
 
     def action_start_publish_marked_background(self):
         products = self._require_marked_for_batch("Publicar marcados en lote")
@@ -1651,59 +1710,41 @@ class SyscomProduct(models.Model):
             products,
             source_label="Marcados en lote (%s)" % ", ".join(products.mapped("syscom_id")),
         )
-        return self._notificacion_encolado(resultado, "marcados en lote")
+        return self._notificacion_encolado(resultado, _("marcados en lote"))
 
     def action_start_recompute_syscom_costs(self):
         job = self.env["sync.syscom.cost.job"].create_recompute_all_job()
-        return {
-            "type": "ir.actions.client",
-            "tag": "display_notification",
-            "params": {
-                "title": "Sync SYSCOM",
-                "message": "Trabajo de recálculo de costos programado: %s." % job.display_name,
-                "type": "success",
-                "sticky": False,
-            },
-        }
+        return self._notificacion_job(job, _("recálculo de costos"), MENU_TRABAJOS_COSTOS)
 
     def action_start_sync_catalog_models(self):
         job = self.env["sync.syscom.sync.job"].create_brands_products_job()
-        return {
-            "type": "ir.actions.client",
-            "tag": "display_notification",
-            "params": {
-                "title": "Sync SYSCOM",
-                "message": "Trabajo de sincronización de catálogo de modelos programado: %s." % job.display_name,
-                "type": "success",
-                "sticky": False,
-            },
-        }
+        # Mismo tipo de job que el botón 1 de Marcas, así que puede reusar uno encolado
+        # desde allá. Por eso lleva `con_etapa`: es el único de los cuatro con etapas.
+        return self._notificacion_job(
+            job,
+            _("sincronización de catálogo de modelos"),
+            MENU_TRABAJOS_SYNC,
+            con_etapa=True,
+            nombre_corto=_("catálogo de modelos"),
+        )
 
     def action_start_sync_extended_product_data(self):
         job = self.env["sync.syscom.product.data.job"].create_sync_all_job()
-        return {
-            "type": "ir.actions.client",
-            "tag": "display_notification",
-            "params": {
-                "title": "Sync SYSCOM",
-                "message": "Trabajo de datos extendidos programado: %s." % job.display_name,
-                "type": "success",
-                "sticky": False,
-            },
-        }
+        return self._notificacion_job(
+            job,
+            _("datos extendidos (garantía, dimensiones, peso y características)"),
+            MENU_TRABAJOS_DATOS,
+            nombre_corto=_("datos extendidos"),
+        )
 
     def action_start_configure_syscom_dropshipping(self):
         job = self.env["sync.syscom.dropship.job"].create_configure_all_job()
-        return {
-            "type": "ir.actions.client",
-            "tag": "display_notification",
-            "params": {
-                "title": "Sync SYSCOM",
-                "message": "Trabajo de dropshipping SYSCOM programado: %s." % job.display_name,
-                "type": "success",
-                "sticky": False,
-            },
-        }
+        return self._notificacion_job(
+            job,
+            _("regularizar dropshipping"),
+            MENU_TRABAJOS_DROPSHIP,
+            nombre_corto=_("dropshipping"),
+        )
 
     def _get_publish_max_retries(self, params=None):
         """Número máximo de reintentos antes de marcar un producto como 'abandoned'."""
@@ -1718,19 +1759,34 @@ class SyscomProduct(models.Model):
         """Reinicia el estado de publicación de los productos seleccionados para que se reintenten."""
         records = self.exists()
         if not records:
-            raise UserError("Selecciona al menos un producto.")
+            raise UserError(_("Selecciona al menos un producto."))
         records.write({
             "publish_state": "pending",
             "publish_retry_count": 0,
             "sync_error": False,
             "publish_enqueued_at": fields.Datetime.now(),
         })
+        # Este sí limpia el contador y el error a propósito: es el reintento deliberado
+        # sobre una selección concreta, lo contrario del encolado en masa de 8a59f3d.
+        # El participio y el verbo tienen que concordar, así que la frase entera cambia;
+        # no basta con conmutar el sustantivo como en los mensajes de conteo.
+        if len(records) == 1:
+            encabezado = _(
+                "1 modelo reiniciado: vuelve a la cola con el contador de reintentos en "
+                "cero y sin el error anterior. "
+            )
+        else:
+            encabezado = _(
+                "%s modelos reiniciados: vuelven a la cola con el contador de reintentos "
+                "en cero y sin el error anterior. "
+            ) % len(records)
+        mensaje = encabezado + self._texto_cola_publicacion()
         return {
             "type": "ir.actions.client",
             "tag": "display_notification",
             "params": {
-                "title": "Sync SYSCOM",
-                "message": "%s productos reiniciados para publicación." % len(records),
+                "title": _("Sync SYSCOM"),
+                "message": mensaje,
                 "type": "success",
                 "sticky": False,
             },

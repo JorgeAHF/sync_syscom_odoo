@@ -21,7 +21,15 @@ from odoo.tools import format_datetime
 MENU_TRABAJOS_SYNC = "SyncSyscom › Sincronizar › Trabajos sync catálogo"
 MENU_TRABAJOS_CATEGORIAS = "SyncSyscom › Sincronizar › Trabajos categorías"
 MENU_TRABAJOS_PUBLICACION = "SyncSyscom › Sincronizar › Ver trabajos publicación"
+MENU_TRABAJOS_COSTOS = "SyncSyscom › Sincronizar › Trabajos costos"
+MENU_TRABAJOS_DATOS = "SyncSyscom › Sincronizar › Trabajos datos extendidos"
+MENU_TRABAJOS_DROPSHIP = "SyncSyscom › Sincronizar › Trabajos dropshipping"
 MENU_LOGS = "SyncSyscom › Logs"
+
+# Nombre del cron que publica lo que estos botones dejan en cola. Se cita en los
+# mensajes de los botones que NO crean job: ahí no hay nada que mirar salvo la lista,
+# así que el cron responsable es el único dato que explica por qué "no pasa nada".
+CRON_PUBLICAR = "publicar seleccionados"
 
 
 class SyncSyscomJobFeedback(models.AbstractModel):
