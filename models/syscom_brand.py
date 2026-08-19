@@ -12,6 +12,15 @@ from .constants import (
     SYSCOM_PAGE_LIMIT,
 )
 
+# Ruta de menú que se cita en los mensajes, para que el usuario sepa dónde está
+# el detalle de lo que acaba de correr.
+MENU_LOGS = "SyncSyscom › Logs"
+
+# Marcas que se detallan una por una en el log antes de resumir el resto. El cron
+# de purga (80) puede estar apagado, así que un clic sobre 300 marcas no debe
+# dejar 300 líneas.
+MAX_MARCAS_DETALLE_LOG = 20
+
 
 class SyscomBrand(models.Model):
     _name = "sync.syscom.brand"
@@ -558,13 +567,12 @@ class SyscomBrand(models.Model):
         Si hay categorías marcadas en lote filtra por ellas; si no, sincroniza
         todos los modelos de las marcas seleccionadas sin filtro de categoría.
         """
-        categories_selected = self._get_selected_categories()
-        selected_cat_ids = set(categories_selected.mapped("syscom_id"))
+        categorias_alcance = self._get_selected_categories()
 
         brands = self._require_brands_for_view_action("Sincronizar modelos selección vista")
         return self._run_sync_models_action(
             brands,
-            selected_cat_ids or None,
+            categorias_alcance,
             source_label=_("selección vista"),
         )
 
@@ -574,54 +582,254 @@ class SyscomBrand(models.Model):
         Si hay categorías marcadas en lote filtra por ellas; si no, sincroniza
         todos los modelos de las marcas marcadas sin filtro de categoría.
         """
-        categories_selected = self._get_selected_categories()
-        selected_cat_ids = set(categories_selected.mapped("syscom_id"))
+        categorias_alcance = self._get_selected_categories()
 
         brands = self._require_marked_brands("Sincronizar modelos marcados en lote")
         return self._run_sync_models_action(
             brands,
-            selected_cat_ids or None,
+            categorias_alcance,
             source_label=_("marcados en lote"),
         )
 
-    def _run_sync_models_action(self, brands, selected_cat_ids, source_label):
-        stats = self._sync_models_for_brands(brands, allowed_category_syscom_ids=selected_cat_ids)
-        created = stats["created"]
-        updated = stats["updated"]
-        kept = stats["kept"]
+    def _etiqueta_marcas(self, brands, limite=3):
+        """Lista de marcas por ID SYSCOM, recortada para que quepa en el nombre del log."""
+        ids = brands.mapped("syscom_id")
+        if len(ids) <= limite:
+            return ", ".join(ids)
+        return _("%(lista)s y %(resto)s más") % {
+            "lista": ", ".join(ids[:limite]),
+            "resto": len(ids) - limite,
+        }
 
-        self.env["sync.syscom.log"].create({
-            "name": _("Sincronización de modelos (marcas/categorías)"),
-            "kind": "info",
-            "message": _(
-                "Origen: %(source)s. Marcas: %(brands)s. Categorías lote: %(cats)s. Productos creados: %(created)s, actualizados: %(updated)s, retenidos: %(kept)s."
+    def _etiquetas_categorias(self, categorias, limite=None):
+        """Nombra categorías como 'Nombre (id)'.
+
+        El ID no es decoración: hay categorías distintas con el mismo nombre —369 y
+        65674 se llaman las dos "Control de Acceso"—, así que sin él la lista parece
+        traer un duplicado.
+        """
+        etiquetas = [
+            "%s (%s)" % (categoria.name or _("Sin nombre"), categoria.syscom_id)
+            for categoria in categorias
+        ]
+        if limite is None or len(etiquetas) <= limite:
+            return ", ".join(etiquetas)
+        return _("%(lista)s y %(resto)s más") % {
+            "lista": ", ".join(etiquetas[:limite]),
+            "resto": len(etiquetas) - limite,
+        }
+
+    def _mensaje_log_sync_modelos(self, stats, categorias_alcance, source_label):
+        """Arma el detalle que va al log: totales, suma de control y desglose por marca."""
+        lineas = [_("Origen: %s.") % source_label]
+        if categorias_alcance:
+            lineas.append(
+                _("Alcance: solo categorías marcadas — %s.")
+                % self._etiquetas_categorias(categorias_alcance)
+            )
+        else:
+            lineas.append(
+                _("Alcance: todas las categorías de la marca (ninguna categoría marcada en lote).")
+            )
+        lineas.append(
+            _(
+                "Totales: la API devolvió %(traidos)s; sincronizados %(kept)s (creados %(created)s, "
+                "actualizados %(updated)s); descartados por filtro de categorías %(descartados)s; "
+                "sin ID utilizable %(sin_id)s."
             )
             % {
-                "source": source_label,
-                "brands": ", ".join(brands.mapped("syscom_id")),
-                "cats": ", ".join(sorted(selected_cat_ids)),
-                "created": created,
-                "updated": updated,
-                "kept": kept,
-            },
+                "traidos": stats["traidos"],
+                "kept": stats["kept"],
+                "created": stats["created"],
+                "updated": stats["updated"],
+                "descartados": stats["descartados_filtro"],
+                "sin_id": stats["sin_id"],
+            }
+        )
+        # Se imprime para que un humano pueda sumarla a ojo. No se valida con un assert:
+        # cualquier excepción aquí revertiría el sync completo, que es justo el modo de
+        # falla del 429 que queremos dejar de repetir.
+        lineas.append(
+            _(
+                "Suma de control: %(traidos)s = %(kept)s sincronizados + %(descartados)s descartados "
+                "+ %(sin_id)s sin ID."
+            )
+            % {
+                "traidos": stats["traidos"],
+                "kept": stats["kept"],
+                "descartados": stats["descartados_filtro"],
+                "sin_id": stats["sin_id"],
+            }
+        )
+        if stats["categorias_no_locales"]:
+            lineas.append(
+                _(
+                    "Aviso: %s productos traían categorías que no existen en la base local; esas "
+                    "categorías no pudieron participar en el filtro."
+                )
+                % stats["categorias_no_locales"]
+            )
+        lineas.append(_("Por marca:"))
+        for marca in stats["por_marca"][:MAX_MARCAS_DETALLE_LOG]:
+            lineas.append(
+                _(
+                    "  - %(marca)s: API %(traidos)s (páginas %(hechas)s/%(paginas)s, total reportado "
+                    "%(reportado)s) → sincronizados %(kept)s (creados %(created)s, actualizados "
+                    "%(updated)s), descartados por filtro %(descartados)s, sin ID %(sin_id)s."
+                )
+                % {
+                    "marca": marca["marca"],
+                    "traidos": marca["traidos"],
+                    "hechas": marca["paginas_hechas"],
+                    "paginas": marca["paginas_total"] or "¿?",
+                    "reportado": marca["total_reportado"] or "¿?",
+                    "kept": marca["kept"],
+                    "created": marca["created"],
+                    "updated": marca["updated"],
+                    "descartados": marca["descartados_filtro"],
+                    "sin_id": marca["sin_id"],
+                }
+            )
+        resto = len(stats["por_marca"]) - MAX_MARCAS_DETALLE_LOG
+        if resto > 0:
+            lineas.append(_("  … y %s marcas más; ver Totales arriba.") % resto)
+        return "\n".join(lineas)
+
+    def _notificacion_sync_modelos(self, stats, categorias_alcance, source_label, marcas_label):
+        """Redacta la notificación y decide su color.
+
+        Con ``traidos`` en la mano, un resultado en cero por fin puede decir cuál de
+        las tres causas fue: la API no trajo nada, el filtro lo descartó todo, o los
+        productos venían sin ID. Antes las tres salían como el mismo verde.
+        """
+        traidos = stats["traidos"]
+        kept = stats["kept"]
+        descartados = stats["descartados_filtro"]
+        sin_id = stats["sin_id"]
+        categorias = self._etiquetas_categorias(categorias_alcance, limite=2)
+        detalle = _("Detalle en %s.") % MENU_LOGS
+        detalle_por_marca = _("Detalle por marca en %s.") % MENU_LOGS
+
+        sincronizados = _(
+            "Modelos sincronizados desde %(source)s: %(kept)s de %(traidos)s que devolvió la API "
+            "(creados %(created)s, actualizados %(updated)s)."
+        ) % {
+            "source": source_label,
+            "kept": kept,
+            "traidos": traidos,
+            "created": stats["created"],
+            "updated": stats["updated"],
+        }
+
+        if kept and not descartados:
+            tipo = "success"
+            partes = [sincronizados]
+        elif kept:
+            tipo = "warning"
+            partes = [
+                sincronizados,
+                _("El filtro por categorías marcadas descartó %s.") % descartados,
+                _("Categorías activas: %s.") % categorias,
+                detalle_por_marca,
+            ]
+        elif not traidos:
+            tipo = "warning"
+            partes = [
+                _("La API no devolvió productos para las marcas indicadas (%s). No se sincronizó nada.")
+                % marcas_label,
+                detalle,
+            ]
+        elif descartados == traidos:
+            tipo = "warning"
+            partes = [
+                _(
+                    "La API devolvió %(traidos)s productos de %(marcas)s y el filtro por categorías "
+                    "marcadas descartó los %(descartados)s. No se sincronizó nada."
+                )
+                % {"traidos": traidos, "marcas": marcas_label, "descartados": descartados},
+                _("Categorías activas: %s.") % categorias,
+                _("Si querías traer la marca completa, desmarca esas categorías."),
+                detalle,
+            ]
+        elif sin_id == traidos:
+            tipo = "warning"
+            partes = [
+                _(
+                    "La API devolvió %(traidos)s productos de %(marcas)s, pero ninguno traía un ID "
+                    "utilizable. No se sincronizó nada."
+                )
+                % {"traidos": traidos, "marcas": marcas_label},
+                detalle,
+            ]
+        else:
+            tipo = "warning"
+            partes = [
+                _(
+                    "No se sincronizó ningún modelo de %(marcas)s. La API devolvió %(traidos)s: "
+                    "%(descartados)s descartados por el filtro de categorías marcadas, %(sin_id)s "
+                    "sin ID utilizable."
+                )
+                % {
+                    "marcas": marcas_label,
+                    "traidos": traidos,
+                    "descartados": descartados,
+                    "sin_id": sin_id,
+                },
+                detalle,
+            ]
+
+        if stats["categorias_no_locales"]:
+            partes.append(
+                _(
+                    "Además, %s productos traían categorías que no existen en la base local y no "
+                    "pudieron evaluarse contra el filtro."
+                )
+                % stats["categorias_no_locales"]
+            )
+
+        return " ".join(partes), tipo
+
+    def _run_sync_models_action(self, brands, categorias_alcance, source_label):
+        allowed_cat_ids = set(categorias_alcance.mapped("syscom_id")) or None
+        stats = self._sync_models_for_brands(brands, allowed_category_syscom_ids=allowed_cat_ids)
+        marcas_label = self._etiqueta_marcas(brands)
+        hubo_descartes = bool(stats["descartados_filtro"] or stats["categorias_no_locales"])
+
+        self.env["sync.syscom.log"].create({
+            # Nombre distintivo y con las marcas dentro: en la lista de Logs esta línea
+            # compite con cientos de entradas de los crons de fondo.
+            "name": _("Traer productos de marcas: %s") % marcas_label,
+            "kind": "warn" if (not stats["kept"] or hubo_descartes) else "info",
+            "message": self._mensaje_log_sync_modelos(stats, categorias_alcance, source_label),
         })
 
+        mensaje, tipo = self._notificacion_sync_modelos(
+            stats,
+            categorias_alcance,
+            source_label,
+            marcas_label,
+        )
         return {
             "type": "ir.actions.client",
             "tag": "display_notification",
             "params": {
                 "title": _("Sync SYSCOM"),
-                "message": _(
-                    "Modelos sincronizados desde %(source)s: %(kept)s (creados: %(created)s, actualizados: %(updated)s)."
-                )
-                % {"source": source_label, "created": created, "updated": updated, "kept": kept},
-                "type": "success",
-                "sticky": False,
+                "message": mensaje,
+                "type": tipo,
+                # Un resultado que hay que investigar no puede desvanecerse solo.
+                "sticky": tipo == "warning",
             },
         }
 
     def _sync_models_for_brands(self, brands, allowed_category_syscom_ids=None):
-        """Sync staging products for brands, optionally filtering by allowed SYSCOM categories."""
+        """Sync staging products for brands, optionally filtering by allowed SYSCOM categories.
+
+        Además de los contadores de escritura devuelve las cifras que permiten saber
+        por qué un producto no llegó a la base: cuántos trajo la API, cuántos descartó
+        el filtro de categorías y cuántos venían sin ID usable. Sin ellas un resultado
+        en cero es indistinguible de una marca vacía, que fue exactamente lo que pasó
+        con 3m el 18/08/2026.
+        """
         params = self.env["ir.config_parameter"].sudo()
         token = (params.get_param("sync_syscom.syscom_api_token") or "").strip()
         if not token:
@@ -633,23 +841,44 @@ class SyscomBrand(models.Model):
 
         allowed_set = set(allowed_category_syscom_ids or [])
         created = updated = kept = 0
+        traidos = descartados_filtro = sin_id = categorias_no_locales = 0
+        por_marca = []
         Product = self.env["sync.syscom.product"]
         products_synced = Product.browse([])
 
         for brand in brands:
-            products, _pages_done, _pages_total, _total_count = self._fetch_all_brand_products(
+            products, paginas_hechas, paginas_total, total_reportado = self._fetch_all_brand_products(
                 client,
                 brand.syscom_id,
                 stock=params.get_param("sync_syscom.brand_products_stock"),
-            ) or []
+            )
+            marca = {
+                "marca": brand.syscom_id,
+                "traidos": len(products),
+                "created": 0,
+                "updated": 0,
+                "kept": 0,
+                "descartados_filtro": 0,
+                "sin_id": 0,
+                "categorias_no_locales": 0,
+                "paginas_hechas": paginas_hechas,
+                "paginas_total": paginas_total,
+                "total_reportado": total_reportado,
+            }
+            por_marca.append(marca)
+            traidos += marca["traidos"]
+
             for product in products:
                 prod_syscom_id = str(product.get("producto_id") or product.get("id") or "").strip()
                 if not prod_syscom_id:
+                    sin_id += 1
+                    marca["sin_id"] += 1
                     continue
 
                 categories = product.get("categorías") or product.get("categorias") or []
                 cat_ids = []
                 match_scope = not allowed_set
+                falta_categoria_local = False
                 for cat in categories:
                     cat_syscom_id = str(cat.get("id") or "").strip()
                     if not cat_syscom_id:
@@ -662,7 +891,17 @@ class SyscomBrand(models.Model):
                         cat_ids.append(cat_record.id)
                         if allowed_set and cat_syscom_id in allowed_set:
                             match_scope = True
+                    else:
+                        # La categoría existe en SYSCOM pero no en la base local, así que
+                        # no puede participar en el filtro: si este producto se descarta,
+                        # el descarte podría ser un falso negativo.
+                        falta_categoria_local = True
+                if falta_categoria_local:
+                    categorias_no_locales += 1
+                    marca["categorias_no_locales"] += 1
                 if not match_scope:
+                    descartados_filtro += 1
+                    marca["descartados_filtro"] += 1
                     continue
 
                 vals = {
@@ -676,20 +915,28 @@ class SyscomBrand(models.Model):
                 if prod_record:
                     prod_record.write(vals)
                     updated += 1
+                    marca["updated"] += 1
                 else:
                     prod_record = Product.create(vals)
                     created += 1
+                    marca["created"] += 1
 
                 if cat_ids:
                     prod_record.category_ids = [(6, 0, cat_ids)]
 
                 products_synced |= prod_record
                 kept += 1
+                marca["kept"] += 1
 
         return {
             "created": created,
             "updated": updated,
             "kept": kept,
+            "traidos": traidos,
+            "descartados_filtro": descartados_filtro,
+            "sin_id": sin_id,
+            "categorias_no_locales": categorias_no_locales,
+            "por_marca": por_marca,
             "products": products_synced,
         }
 
