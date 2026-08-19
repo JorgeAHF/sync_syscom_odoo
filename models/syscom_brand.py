@@ -3,6 +3,7 @@ import time
 from odoo import _, fields, models
 from odoo.exceptions import UserError
 
+from .job_feedback import MENU_LOGS, MENU_TRABAJOS_PUBLICACION, MENU_TRABAJOS_SYNC
 from .syscom_client import SyscomClient
 from .constants import (
     SYSCOM_DEFAULT_BASE_URL,
@@ -12,10 +13,6 @@ from .constants import (
     SYSCOM_PAGE_LIMIT,
 )
 
-# Ruta de menú que se cita en los mensajes, para que el usuario sepa dónde está
-# el detalle de lo que acaba de correr.
-MENU_LOGS = "SyncSyscom › Logs"
-
 # Marcas que se detallan una por una en el log antes de resumir el resto. El cron
 # de purga (80) puede estar apagado, así que un clic sobre 300 marcas no debe
 # dejar 300 líneas.
@@ -24,6 +21,7 @@ MAX_MARCAS_DETALLE_LOG = 20
 
 class SyscomBrand(models.Model):
     _name = "sync.syscom.brand"
+    _inherit = ["sync.syscom.job.feedback"]
     _description = "Marca SYSCOM"
     _order = "name"
     _rec_name = "syscom_id"
@@ -100,14 +98,32 @@ class SyscomBrand(models.Model):
     def action_start_brand_sync(self):
         """Programa la sincronización de marcas y modelos en background."""
         job = self.env["sync.syscom.sync.job"].create_brands_products_job()
+        # _create_job reusa el job en curso si ya hay uno del mismo tipo, así que sin
+        # leer la bandera el segundo clic salía idéntico al primero: el usuario creía
+        # haber reencolado y no había encolado nada.
+        if job.env.context.get("sync_syscom_job_creado", True):
+            mensaje = _(
+                "Trabajo #%(id)s creado: sincronización de marcas y modelos. "
+                "Síguelo en %(menu)s."
+            ) % {"id": job.id, "menu": MENU_TRABAJOS_SYNC}
+            tipo, pegajoso = "success", False
+        else:
+            mensaje = _(
+                "Ya había un trabajo de marcas y modelos en curso: %(detalle)s. "
+                "No se creó otro. Síguelo en %(menu)s."
+            ) % {
+                "detalle": self._descripcion_job_existente(job, con_etapa=True),
+                "menu": MENU_TRABAJOS_SYNC,
+            }
+            tipo, pegajoso = "warning", True
         return {
             "type": "ir.actions.client",
             "tag": "display_notification",
             "params": {
                 "title": _("Sync SYSCOM"),
-                "message": _("Trabajo de sincronización de marcas/modelos programado: %s.") % job.display_name,
-                "type": "success",
-                "sticky": False,
+                "message": mensaje,
+                "type": tipo,
+                "sticky": pegajoso,
             },
         }
 
@@ -987,10 +1003,18 @@ class SyscomBrand(models.Model):
         # Antes esto era un `raise UserError` cuando no se encolaba nada. La excepción
         # revertía el sync que se acababa de hacer —cuota gastada, cero escrito, ni el
         # log— que es el mismo modo de falla del 429. Ahora avisa sin tirar el trabajo.
+        # Estos botones no crean ningún sync.job: marcan productos como 'pending' y el
+        # cron 60 los publica. No hay ID que citar, así que la retroalimentación es
+        # cuántos quedaron en cola, quién los va a procesar y dónde mirarlos.
         if encolados:
-            mensaje = _("Publicación por marca iniciada en segundo plano desde %(source)s. En cola: %(queued)s.") % {
-                "source": source_label,
-                "queued": encolados,
+            mensaje = _(
+                "%(queued)s de %(marcas)s en cola para publicar. Los publica en segundo "
+                "plano el cron 'publicar seleccionados'; míralos en %(menu)s, filtro "
+                "Pendientes."
+            ) % {
+                "queued": _("1 modelo") if encolados == 1 else _("%s modelos") % encolados,
+                "marcas": marcas_label,
+                "menu": MENU_TRABAJOS_PUBLICACION,
             }
         elif stats["traidos"]:
             mensaje = _(

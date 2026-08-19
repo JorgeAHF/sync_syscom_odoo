@@ -2,18 +2,14 @@ import time
 
 from odoo import _, api, fields, models
 from odoo.exceptions import UserError
-from odoo.tools import format_datetime
 
+from .job_feedback import MENU_TRABAJOS_CATEGORIAS, MENU_TRABAJOS_SYNC
 from .syscom_client import SyscomClient
-
-# Rutas de menú que se citan en los mensajes de los botones, para que el usuario sepa
-# dónde seguir el trabajo que acaba de encolar.
-MENU_TRABAJOS_SYNC = "SyncSyscom › Sincronizar › Trabajos sync catálogo"
-MENU_TRABAJOS_CATEGORIAS = "SyncSyscom › Sincronizar › Trabajos categorías"
 
 
 class SyscomCategory(models.Model):
     _name = "sync.syscom.category"
+    _inherit = ["sync.syscom.job.feedback"]
     _description = "Categoría SYSCOM"
     _order = "name"
 
@@ -563,28 +559,6 @@ class SyscomCategory(models.Model):
     def action_publish_marked_categories(self, include_children=None):
         categories = self._require_marked_categories("Publicar marcadas en lote")
         return self._run_publish_scope_categories(categories, include_children, source_label=_("marcadas en lote"))
-
-    def _etiqueta_seleccion(self, registro, nombre_campo):
-        """Etiqueta que muestra la interfaz para un campo de selección.
-
-        Usa ``_description_selection``, que aplica la traducción del idioma del
-        contexto, en vez de ``.selection``, que devuelve el valor fuente del código.
-        """
-        opciones = dict(registro._fields[nombre_campo]._description_selection(self.env))
-        valor = registro[nombre_campo]
-        return opciones.get(valor, valor)
-
-    def _descripcion_job_existente(self, job, con_etapa=False):
-        """Describe un job que ya estaba en curso: id, estado, etapa y cuándo se creó."""
-        partes = [
-            "#%s" % job.id,
-            _("estado %s") % self._etiqueta_seleccion(job, "state"),
-        ]
-        if con_etapa:
-            partes.append(_("etapa %s") % self._etiqueta_seleccion(job, "stage"))
-        if job.create_date:
-            partes.append(_("creado el %s") % format_datetime(self.env, job.create_date))
-        return ", ".join(partes)
 
     def _run_publish_scope_categories(self, categories, include_children, source_label):
         params = self.env["ir.config_parameter"].sudo()

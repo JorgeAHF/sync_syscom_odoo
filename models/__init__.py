@@ -1,4 +1,5 @@
 from . import constants
+from . import job_feedback
 from . import res_config_settings
 from . import res_partner
 from . import syscom_client
