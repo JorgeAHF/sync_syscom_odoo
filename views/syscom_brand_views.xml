@@ -5,7 +5,6 @@
         <record id="server_action_sync_syscom_brand" model="ir.actions.server">
             <field name="name">Actualizar lista de marcas</field>
             <field name="model_id" ref="model_sync_syscom_brand"/>
-            <field name="binding_model_id" ref="model_sync_syscom_brand"/>
             <field name="binding_type">action</field>
             <field name="state">code</field>
             <field name="code">
@@ -16,7 +15,6 @@ action = env["sync.syscom.brand"].action_start_brand_sync()
         <record id="server_action_sync_syscom_models_selected" model="ir.actions.server">
             <field name="name">Traer productos de las marcas seleccionadas</field>
             <field name="model_id" ref="model_sync_syscom_brand"/>
-            <field name="binding_model_id" ref="model_sync_syscom_brand"/>
             <field name="binding_type">action</field>
             <field name="state">code</field>
             <field name="code">
@@ -37,7 +35,6 @@ action = env["sync.syscom.brand"].action_start_brand_sync()
         <record id="server_action_publish_scope_brands" model="ir.actions.server">
             <field name="name">Publicar productos de las marcas seleccionadas</field>
             <field name="model_id" ref="model_sync_syscom_brand"/>
-            <field name="binding_model_id" ref="model_sync_syscom_brand"/>
             <field name="binding_type">action</field>
             <field name="state">code</field>
             <field name="code">
