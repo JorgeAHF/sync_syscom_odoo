@@ -84,6 +84,10 @@ action = env["sync.syscom.brand"].action_publish_marked_brands()
                     <field name="syscom_id"/>
                     <field name="title"/>
                     <field name="category_count" string="Categorías"/>
+                    <!-- Frescura por marca. El aviso de "hay N rancias" dice cuántas;
+                         esta columna dice cuáles, que es lo que hace falta para decidir
+                         si el dato sirve. -->
+                    <field name="write_date" string="Actualizada" optional="show"/>
                 </list>
             </field>
         </record>
