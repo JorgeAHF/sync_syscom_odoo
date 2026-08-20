@@ -256,6 +256,10 @@ class SyncSyscomSyncJob(models.Model):
                 "total": batch["total"],
             },
         })
+        if batch.get("rate_limit"):
+            # El avance ya quedó escrito arriba, así que la señal sube sin perder nada:
+            # cron_process_sync_jobs pausa la ruta y se retoma en este offset.
+            raise batch["rate_limit"]
         if batch["finished"]:
             self._advance_or_finish()
 

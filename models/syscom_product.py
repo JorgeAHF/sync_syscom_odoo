@@ -9,7 +9,14 @@ from .job_feedback import (
     MENU_TRABAJOS_DROPSHIP,
     MENU_TRABAJOS_PUBLICACION,
     MENU_TRABAJOS_SYNC,
+    aplazar_por_rate_limit,
+    reiniciar_aplazamientos,
+    segundos_de_pausa_restantes,
 )
+from .syscom_client import SyscomRateLimitError
+
+# Ruta de pausa de la publicación en background (cron 60).
+RUTA_PUBLICAR = "publicar_seleccionados"
 
 from .constants import (
     SYSCOM_DEFAULT_BASE_URL,
@@ -1825,6 +1832,11 @@ class SyscomProduct(models.Model):
 
         max_retries = self._get_publish_max_retries(params)
 
+        # Este cron corre cada minuto, así que sin esta comprobación volvería a la API
+        # 60 s después de un 429.
+        if segundos_de_pausa_restantes(self.env, RUTA_PUBLICAR):
+            return
+
         # También reintentar productos en estado 'error' que aún no superaron el límite.
         pending = self.search(
             [("publish_state", "in", ["pending", "error"]),
@@ -1845,7 +1857,10 @@ class SyscomProduct(models.Model):
         ok = 0
         err = 0
         abandoned = 0
+        rate_limit = None
+        atendidos = self.browse()
         for prod in pending:
+            atendidos |= prod
             try:
                 # Savepoint por producto. Sin el, un fallo de base de datos (el
                 # SerializationFailure que sale cuando el cron 66 encola mientras este
@@ -1864,6 +1879,13 @@ class SyscomProduct(models.Model):
                         "sync_error": low_stock_note or False,
                     })
                 ok += 1
+            except SyscomRateLimitError as exc:
+                # El 429 no dice nada de este producto: no gasta reintento ni lo
+                # acerca a 'abandoned'. Tres 429 seguidos lo abandonaban por una
+                # razon que no tenia que ver con el. Vuelve a la cola tal cual.
+                atendidos -= prod
+                rate_limit = exc
+                break
             except Exception as exc:
                 err += 1
                 mensaje_error = str(exc)
@@ -1901,15 +1923,32 @@ class SyscomProduct(models.Model):
                 })
                 continue
 
+        # Los que quedaron sin atender siguen en 'processing' del write de arriba.
+        # Sin devolverlos a 'pending' se quedarían fuera del dominio del cron para
+        # siempre: 'processing' no está en ["pending", "error"].
+        sin_atender = pending - atendidos
+        if sin_atender:
+            sin_atender.write({"publish_state": "pending", "publish_started_at": False})
+
         self.env["sync.syscom.log"].sudo().create({
             "name": "Publicación en background (batch)",
-            "kind": "info",
-            "message": "Batch publicado. Modelos: %(products)s. OK: %(ok)s, errores: %(err)s, abandonados: %(ab)s."
+            "kind": "warn" if rate_limit else "info",
+            "message": "Batch publicado. Modelos: %(products)s. OK: %(ok)s, errores: %(err)s, abandonados: %(ab)s.%(rl)s"
             % {
-                "products": self._describe_products_for_log(pending),
+                "products": self._describe_products_for_log(atendidos or pending),
                 "ok": ok,
                 "err": err,
                 "ab": abandoned,
+                "rl": (" Cortado por HTTP 429: %s productos vuelven a la cola sin gastar reintento." % len(sin_atender)) if rate_limit else "",
             },
         })
+
+        if rate_limit:
+            aplazar_por_rate_limit(
+                self.env, RUTA_PUBLICAR, rate_limit, "Publicación en background",
+                cron_xmlid="sync_syscom.cron_sync_syscom_publish_selected",
+                con_tope=False,
+            )
+        else:
+            reiniciar_aplazamientos(self.env, RUTA_PUBLICAR)
  

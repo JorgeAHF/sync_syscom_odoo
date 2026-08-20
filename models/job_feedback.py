@@ -99,7 +99,7 @@ def reiniciar_aplazamientos(env, ruta):
         params.set_param(_clave_pausa(ruta), "")
 
 
-def aplazar_por_rate_limit(env, ruta, exc, etiqueta, cron_xmlid=None):
+def aplazar_por_rate_limit(env, ruta, exc, etiqueta, cron_xmlid=None, con_tope=True):
     """Pausa la ruta tras un 429 en vez de dormir el hilo del cron.
 
     Dormir seria lo peor que se puede hacer aqui: solo hay 2 hilos de cron
@@ -110,9 +110,14 @@ def aplazar_por_rate_limit(env, ruta, exc, etiqueta, cron_xmlid=None):
 
     Devuelve ``(aplazado, segundos)``. ``aplazado=False`` significa que se agoto el
     tope de aplazamientos consecutivos y quien llama debe dar el trabajo por perdido.
+
+    ``con_tope=False`` desactiva ese limite. Lo usa la ruta de publicacion, que no
+    tiene un job al que rendirse: sus productos se quedan en cola y se publican
+    cuando la API se recupere. Ahi el tope solo conseguiria que el cron volviera a
+    martillear cada minuto, que es justo lo que se quiere evitar.
     """
     previos = contar_aplazamientos(env, ruta)
-    if previos >= MAX_RATE_LIMIT_POSTPONES:
+    if con_tope and previos >= MAX_RATE_LIMIT_POSTPONES:
         return False, 0
 
     espera = segundos_de_espera_efectivos(env, getattr(exc, "retry_after", None), previos)

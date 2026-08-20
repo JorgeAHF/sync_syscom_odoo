@@ -4,7 +4,7 @@ from odoo import _, fields, models
 from odoo.exceptions import UserError
 
 from .job_feedback import MENU_LOGS, MENU_TRABAJOS_PUBLICACION, MENU_TRABAJOS_SYNC
-from .syscom_client import SyscomClient
+from .syscom_client import SyscomClient, SyscomRateLimitError
 from .constants import (
     SYSCOM_DEFAULT_BASE_URL,
     SYSCOM_DEFAULT_TIMEOUT,
@@ -289,13 +289,24 @@ class SyscomBrand(models.Model):
         created = 0
         updated = 0
         timeout_skip = 0
+        avanzadas = 0
+        rate_limit = None
 
         for brand in slice_brands:
+            avanzadas += 1
             syscom_id = str(brand.get("id") or "").strip()
             if not syscom_id:
                 continue
             try:
                 detail = client.get_brand_detail(syscom_id, timeout=detail_timeout) or {}
+            except SyscomRateLimitError as exc:
+                # Un 429 no es "esta marca falló", es la API entera diciendo que pare.
+                # Con el `except UserError` de abajo se contaba como timeout y el bucle
+                # seguía: el barrido manual del 20/08/2026 encajó 41 respuestas 429
+                # seguidas en un solo lote antes de que lo parase un guardia externo.
+                avanzadas -= 1
+                rate_limit = exc
+                break
             except UserError:
                 timeout_skip += 1
                 continue
@@ -334,19 +345,23 @@ class SyscomBrand(models.Model):
 
             processed += 1
 
-        next_offset = offset + len(slice_brands)
-        finished = next_offset >= total
+        # Con rate limit el offset avanza solo lo realmente consumido, para que el
+        # siguiente intento retome en la marca que se quedó sin respuesta.
+        consumidas = avanzadas if rate_limit else len(slice_brands)
+        next_offset = offset + consumidas
+        finished = not rate_limit and next_offset >= total
         if finished:
             next_offset = 0
 
         return {
             "total": total,
-            "processed": len(slice_brands),
+            "processed": consumidas,
             "created": created,
             "updated": updated,
             "timeout_skip": timeout_skip,
             "next_offset": next_offset,
             "finished": finished,
+            "rate_limit": rate_limit,
         }
 
     def _sync_local_brand_products_batch(self, client=None, offset=0, chunk_limit=None):
