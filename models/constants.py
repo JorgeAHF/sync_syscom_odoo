@@ -38,3 +38,13 @@ DEFAULT_LOG_RETENTION_DAYS = 90      # días que se conservan registros en sync.
 
 # ── Reintentos de publicación ─────────────────────────────────────────────────
 DEFAULT_PUBLISH_MAX_RETRIES = 3      # número máximo de reintentos antes de marcar "abandoned"
+
+# ── Rate limit (HTTP 429) ─────────────────────────────────────────────────────
+# Espera cuando SYSCOM devuelve 429 y NO manda cabecera Retry-After. Al 20/08/2026
+# no sabemos si la manda: se recogieron 41 respuestas 429 reales sin capturar
+# cabeceras. El cliente registra el valor crudo la primera vez que aparezca.
+DEFAULT_RATE_LIMIT_BACKOFF = 120     # segundos
+MAX_RATE_LIMIT_BACKOFF = 1800        # tope del crecimiento exponencial: 30 min
+# Aplazamientos consecutivos antes de dar un job por perdido. Sin este tope, un
+# rate limit permanente dejaria el job reprogramandose para siempre.
+MAX_RATE_LIMIT_POSTPONES = 5

@@ -17,6 +17,31 @@ desde un cron o ``odoo shell`` no.  Como método, ``self.env.lang`` resuelve sie
 from odoo import _, models
 from odoo.tools import format_datetime
 
+from .constants import DEFAULT_RATE_LIMIT_BACKOFF, MAX_RATE_LIMIT_BACKOFF
+
+
+def segundos_de_espera_efectivos(env, retry_after=None, aplazamientos=0):
+    """Cuánto esperar tras un 429, en segundos.
+
+    Va como función suelta y no como método del mixin, al contrario que todo lo
+    demás de este archivo: no llama a ``_()``, así que la trampa de ``_get_lang``
+    descrita arriba no aplica. Solo lee un parámetro y hace aritmética.
+
+    Si la respuesta trajo ``Retry-After``, manda esa cifra: es la única fuente
+    que sabe de verdad cuándo se abre la ventana. Si no vino, se usa el respaldo
+    configurado duplicándolo por cada aplazamiento consecutivo, con tope.
+    """
+    if retry_after is not None and retry_after > 0:
+        return min(int(retry_after), MAX_RATE_LIMIT_BACKOFF)
+
+    params = env["ir.config_parameter"].sudo()
+    try:
+        base = int(params.get_param("sync_syscom.rate_limit_backoff_seconds") or DEFAULT_RATE_LIMIT_BACKOFF)
+    except (TypeError, ValueError):
+        base = DEFAULT_RATE_LIMIT_BACKOFF
+    base = max(base, 1)
+    return min(base * (2 ** max(int(aplazamientos or 0), 0)), MAX_RATE_LIMIT_BACKOFF)
+
 # Rutas de menú que se citan en los mensajes, para que el usuario sepa dónde mirar.
 MENU_TRABAJOS_SYNC = "SyncSyscom › Sincronizar › Trabajos sync catálogo"
 MENU_TRABAJOS_CATEGORIAS = "SyncSyscom › Sincronizar › Trabajos categorías"
