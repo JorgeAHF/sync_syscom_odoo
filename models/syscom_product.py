@@ -1246,7 +1246,11 @@ class SyscomProduct(models.Model):
                 })
                 self._apply_extended_values_to_product(prod, detail)
             except Exception as exc:
-                prod.write({"sync_error": str(exc), "synced_at": now})
+                # OJO: aquí NO se escribe `synced_at`. Un intento fallido no sincronizó
+                # nada, así que ponerle la fecha de ahora convierte el campo en una
+                # mentira: dice "actualizado hace un minuto" sobre datos viejos, y el
+                # valor bueno se pierde para siempre (el campo no lleva tracking).
+                prod.write({"sync_error": str(exc)})
 
         # 2) Refresh product.template publicados (eCommerce) -- POR LOTES
         Template = self.env["product.template"].sudo()
@@ -1336,7 +1340,12 @@ class SyscomProduct(models.Model):
                     tmpl.write({"is_published": False})
                 updated += 1
             except Exception:
-                tmpl.write({"syscom_api_ok": False, "syscom_stock_synced_at": now})
+                # Misma razón que en la pasada 1: `syscom_stock_synced_at` significa
+                # "cuándo se refrescó el stock", y un fallo no lo refrescó. Escribirlo
+                # aquí es lo que dejó 331 plantillas diciendo que estaban al día cuando
+                # muestran existencias sin verificar. `syscom_api_ok = False` sí es
+                # verdad y se queda.
+                tmpl.write({"syscom_api_ok": False})
                 failed += 1
 
         if templates:
