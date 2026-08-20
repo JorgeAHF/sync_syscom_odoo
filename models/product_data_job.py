@@ -1,6 +1,14 @@
 from odoo import _, api, fields, models
 
 from .constants import DEFAULT_PRODUCT_DATA_BATCH_SIZE
+from .job_feedback import (
+    aplazar_por_rate_limit,
+    reiniciar_aplazamientos,
+    segundos_de_pausa_restantes,
+)
+from .syscom_client import SyscomRateLimitError
+
+RUTA_PRODUCT_DATA = "product_data_jobs"
 
 
 class SyncSyscomProductDataJob(models.Model):
@@ -155,10 +163,17 @@ class SyncSyscomProductDataJob(models.Model):
         skipped_products = 0
         failed_products = 0
 
+        procesados = 0
+        rate_limit = None
+
         for product in batch_products:
             client = client or Product._get_client()
             # Se cuenta la llamada, no el acierto: un 404 gasta cuota igual que un 200.
             remote_fetches += 1
+            # Y se cuenta el producto al entrar, no al salir bien: si solo subiera en
+            # el camino del exito, un producto que falla no avanzaria el offset y el
+            # lote siguiente volveria a empezar por el mismo, en bucle.
+            procesados += 1
             try:
                 # Savepoint por producto. Si el fallo es de base de datos y no de la
                 # API, sin él el cursor queda abortado y el write del except revienta
@@ -166,6 +181,16 @@ class SyncSyscomProductDataJob(models.Model):
                 # otra vía.
                 with self.env.cr.savepoint():
                     staging_ok, template_ok = self._enriquecer_un_producto(product, client)
+            except SyscomRateLimitError as exc:
+                # El aislamiento por producto NO aplica aquí: un 429 no es un problema
+                # de este producto, es la API entera diciendo que pare. Seguir el bucle
+                # gastaría el resto del lote contra una puerta cerrada. Se corta, se
+                # guarda lo hecho hasta aquí y se deja subir la señal para que el cron
+                # pause la ruta.
+                remote_fetches -= 1  # esta llamada no llegó a traer nada
+                procesados -= 1      # este producto queda para la próxima pasada
+                rate_limit = exc
+                break
             except Exception as exc:
                 failed_products += 1
                 product.write({"sync_error": str(exc)})
@@ -188,12 +213,12 @@ class SyncSyscomProductDataJob(models.Model):
             if template_ok:
                 updated_templates += 1
 
-        next_offset = offset + len(batch_products)
-        done = next_offset >= total
+        next_offset = offset + procesados
+        done = not rate_limit and next_offset >= total
         self.write({
             "product_offset": 0 if done else next_offset,
             "total_products": total,
-            "processed_products": self.processed_products + len(batch_products),
+            "processed_products": self.processed_products + procesados,
             "updated_products": self.updated_products + updated_products,
             "updated_templates": self.updated_templates + updated_templates,
             "remote_fetches": self.remote_fetches + remote_fetches,
@@ -204,12 +229,12 @@ class SyncSyscomProductDataJob(models.Model):
         self.env["sync.syscom.log"].sudo().create({
             "name": _("Trabajo datos extendidos (batch)"),
             # Un lote con productos caídos no se entierra entre los info de rutina.
-            "kind": "warn" if failed_products else "info",
+            "kind": "warn" if (failed_products or rate_limit) else "info",
             "message": _(
                 "Job %(job)s batch. Revisados: %(processed)s, staging: %(products)s, plantillas: %(templates)s, remoto: %(remote)s, omitidos: %(skipped)s, con error: %(failed)s. Offset: %(offset)s/%(total)s."
             ) % {
                 "job": self.display_name,
-                "processed": len(batch_products),
+                "processed": procesados,
                 "products": updated_products,
                 "templates": updated_templates,
                 "remote": remote_fetches,
@@ -219,6 +244,11 @@ class SyncSyscomProductDataJob(models.Model):
                 "total": total,
             },
         })
+
+        if rate_limit:
+            # El avance ya está escrito arriba, así que la señal sube sin perder nada:
+            # el cron pausa la ruta y el próximo intento retoma en este offset.
+            raise rate_limit
 
         if done:
             self._mark_done()
@@ -242,10 +272,22 @@ class SyncSyscomProductDataJob(models.Model):
 
     @api.model
     def cron_process_product_data_jobs(self):
+        if segundos_de_pausa_restantes(self.env, RUTA_PRODUCT_DATA):
+            return
+
         job = self._claim_next_job()
         if not job:
             return
         try:
             job._process_batch()
+        except SyscomRateLimitError as exc:
+            aplazado, _espera = aplazar_por_rate_limit(
+                self.env, RUTA_PRODUCT_DATA, exc, job.display_name,
+                cron_xmlid="sync_syscom.cron_sync_syscom_product_data_jobs",
+            )
+            if not aplazado:
+                job._mark_error(str(exc))
         except Exception as exc:
             job._mark_error(str(exc))
+        else:
+            reiniciar_aplazamientos(self.env, RUTA_PRODUCT_DATA)

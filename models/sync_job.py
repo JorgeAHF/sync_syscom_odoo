@@ -1,6 +1,16 @@
 from odoo import _, api, fields, models
 from odoo.exceptions import UserError
 
+from .job_feedback import (
+    aplazar_por_rate_limit,
+    reiniciar_aplazamientos,
+    segundos_de_pausa_restantes,
+)
+from .syscom_client import SyscomRateLimitError
+
+# Clave de pausa de esta ruta. El rate limit es global a la API, asi que se pausa la
+# ruta entera y no el job: cualquier job de catalogo espera lo mismo.
+RUTA_SYNC_JOBS = "sync_jobs"
 
 JOB_FLOWS = {
     "categories_only": ["categories"],
@@ -315,10 +325,29 @@ class SyncSyscomSyncJob(models.Model):
 
     @api.model
     def cron_process_sync_jobs(self):
+        # La ruta puede estar en pausa por un 429 previo. Se comprueba antes de
+        # reclamar job: si no, este cron volveria a la API 60 s despues del rate
+        # limit, porque corre cada minuto.
+        if segundos_de_pausa_restantes(self.env, RUTA_SYNC_JOBS):
+            return
+
         job = self._claim_next_job()
         if not job:
             return
         try:
             job._process_batch()
+        except SyscomRateLimitError as exc:
+            # Un 429 no dice nada del job, dice que la API esta saturada. Antes lo
+            # marcaba 'error', que es terminal (_claim_next_job solo toma pending y
+            # running): asi murieron los jobs 14, 21 y 23, el ultimo perdiendo 510
+            # marcas de avance. Ahora el job se queda como esta y se reintenta solo.
+            aplazado, _espera = aplazar_por_rate_limit(
+                self.env, RUTA_SYNC_JOBS, exc, job.display_name,
+                cron_xmlid="sync_syscom.cron_sync_syscom_sync_jobs",
+            )
+            if not aplazado:
+                job._mark_error(str(exc))
         except Exception as exc:
             job._mark_error(str(exc))
+        else:
+            reiniciar_aplazamientos(self.env, RUTA_SYNC_JOBS)
