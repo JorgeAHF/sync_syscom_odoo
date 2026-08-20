@@ -1416,14 +1416,29 @@ class SyscomProduct(models.Model):
             params.set_param("sync_syscom.stock_refresh_last_id", str(templates[-1].id))
         params.set_param("sync_syscom.stock_refresh_last_run", fields.Datetime.to_string(now))
 
+        # El mensaje viejo decía "actualizadas: N, fallidas: M" y nada más: no separaba
+        # causas, no contaba las saltadas por no tener proveedor SYSCOM, y no reportaba
+        # los fallos de la pasada 1 en absoluto. Y salía siempre en `info`, así que 100
+        # plantillas caídas se veían igual que una corrida perfecta.
+        partes = ["Plantillas SYSCOM actualizadas: %s" % updated]
+        if failed:
+            partes.append("fallidas: %s (de ellas retiradas de SYSCOM: %s)" % (failed, retirados))
+        else:
+            partes.append("fallidas: 0")
+        if sin_proveedor:
+            partes.append("saltadas sin proveedor SYSCOM: %s" % sin_proveedor)
+        partes.append("staging marcados en lote: %s" % len(selected))
+        if staging_fallidos:
+            partes.append("staging con error: %s" % staging_fallidos)
+        if rate_limit:
+            partes.append("CORTADO POR HTTP 429, la ruta queda en pausa")
+
         self.env["sync.syscom.log"].sudo().create({
             "name": "Refresco stock/precios SYSCOM",
-            "kind": "info",
-            "message": "Plantillas SYSCOM actualizadas: %(u)s, fallidas: %(f)s. Staging marcados en lote: %(s)s" % {
-                "u": updated,
-                "f": failed,
-                "s": len(selected),
-            },
+            # Un rate limit no es culpa del módulo y ya tiene su propio aviso; un fallo
+            # real sí merece asomar por encima del ruido de rutina.
+            "kind": "warn" if (failed or staging_fallidos) else "info",
+            "message": ". ".join(partes) + ".",
         })
 
         if rate_limit:
