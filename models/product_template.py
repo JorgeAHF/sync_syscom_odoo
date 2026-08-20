@@ -48,6 +48,13 @@ class ProductTemplate(models.Model):
         help="Último estado de validación/refresh contra SYSCOM para este producto.",
         default=True,
     )
+    syscom_sync_error = fields.Text(
+        string="Último error SYSCOM",
+        help="Motivo del último refresco fallido contra SYSCOM. Se limpia en cuanto "
+             "un refresco sale bien. Espejo del campo del mismo nombre en "
+             "sync.syscom.product: sin él, syscom_api_ok = False no dice por qué, y "
+             "un producto retirado del catálogo es indistinguible de un rate limit.",
+    )
     syscom_uom_sat = fields.Char(
         string="Unidad SAT (SYSCOM)",
         help="Clave SAT de unidad devuelta por SYSCOM (ej. H87).",

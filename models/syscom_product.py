@@ -1314,6 +1314,7 @@ class SyscomProduct(models.Model):
                     "syscom_stock_new": stock_new,
                     "syscom_stock_synced_at": now,
                     "syscom_api_ok": True,
+                    "syscom_sync_error": False,
                     "syscom_uom_sat": uom_sat or False,
                 })
                 self._sync_template_unspsc_from_sat(tmpl, sat_key, sat_description)
@@ -1339,14 +1340,23 @@ class SyscomProduct(models.Model):
                 elif not stock_ok and currently_published and "is_published" in tmpl._fields:
                     tmpl.write({"is_published": False})
                 updated += 1
-            except Exception:
+            except Exception as exc:
                 # Misma razón que en la pasada 1: `syscom_stock_synced_at` significa
                 # "cuándo se refrescó el stock", y un fallo no lo refrescó. Escribirlo
                 # aquí es lo que dejó 331 plantillas diciendo que estaban al día cuando
                 # muestran existencias sin verificar. `syscom_api_ok = False` sí es
                 # verdad y se queda.
-                tmpl.write({"syscom_api_ok": False})
+                tmpl.write({"syscom_api_ok": False, "syscom_sync_error": str(exc)})
                 failed += 1
+                self.env["sync.syscom.log"].sudo().create({
+                    "name": "Error refresco stock (plantilla)",
+                    "kind": "error",
+                    "message": "%(label)s [%(syscom)s]. Error: %(err)s." % {
+                        "label": tmpl.display_name,
+                        "syscom": tmpl.syscom_product_id,
+                        "err": exc,
+                    },
+                })
 
         if templates:
             params.set_param("sync_syscom.stock_refresh_last_id", str(templates[-1].id))

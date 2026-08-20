@@ -21,6 +21,12 @@
                             <field name="syscom_length_cm"/>
                             <field name="syscom_width_cm"/>
                         </group>
+                        <group string="Estado del refresco">
+                            <field name="syscom_stock_synced_at" readonly="1"/>
+                            <field name="syscom_api_ok" readonly="1"/>
+                            <field name="syscom_sync_error" readonly="1"
+                                   invisible="syscom_api_ok"/>
+                        </group>
                         <group string="Características">
                             <field name="syscom_features_json"/>
                         </group>
