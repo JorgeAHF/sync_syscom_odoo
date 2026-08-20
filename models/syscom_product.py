@@ -1755,6 +1755,21 @@ class SyscomProduct(models.Model):
         except (TypeError, ValueError):
             return DEFAULT_PUBLISH_MAX_RETRIES
 
+    @staticmethod
+    def _es_error_definitivo(mensaje):
+        """True si reintentar no puede cambiar el resultado.
+
+        Un HTTP 404 de /productos/{id} significa que SYSCOM ya no tiene ese producto en
+        el catálogo. Los tres reintentos gastan tres llamadas para recibir tres veces la
+        misma respuesta. El resto de errores (429, timeouts, cortes de red, fallos de
+        base de datos) sí pueden salir bien en el siguiente intento y conservan sus
+        reintentos.
+
+        El texto lo arma SyscomClient._format_error como "HTTP %s: %s", así que el
+        prefijo es estable.
+        """
+        return "HTTP 404" in (mensaje or "")
+
     def action_reset_publish_state(self):
         """Reinicia el estado de publicación de los productos seleccionados para que se reintenten."""
         records = self.exists()
@@ -1851,8 +1866,10 @@ class SyscomProduct(models.Model):
                 ok += 1
             except Exception as exc:
                 err += 1
+                mensaje_error = str(exc)
+                definitivo = self._es_error_definitivo(mensaje_error)
                 new_retry_count = (prod.publish_retry_count or 0) + 1
-                if new_retry_count >= max_retries:
+                if definitivo or new_retry_count >= max_retries:
                     new_state = "abandoned"
                     abandoned += 1
                 else:
@@ -1861,18 +1878,26 @@ class SyscomProduct(models.Model):
                     "publish_state": new_state,
                     "publish_done_at": fields.Datetime.now(),
                     "publish_retry_count": new_retry_count,
-                    "sync_error": str(exc),
+                    "sync_error": mensaje_error,
                 })
-                self.env["sync.syscom.log"].sudo().create({
-                    "name": "Error publicación background",
-                    "kind": "error",
-                    "message": "%(label)s – intento %(n)s/%(max)s. Estado: %(state)s. Error: %(err)s." % {
+                if definitivo:
+                    detalle = "%(label)s – el producto ya no existe en SYSCOM, no se reintenta. Estado: %(state)s. Error: %(err)s." % {
+                        "label": prod.name or prod.syscom_id,
+                        "state": new_state,
+                        "err": exc,
+                    }
+                else:
+                    detalle = "%(label)s – intento %(n)s/%(max)s. Estado: %(state)s. Error: %(err)s." % {
                         "label": prod.name or prod.syscom_id,
                         "n": new_retry_count,
                         "max": max_retries,
                         "state": new_state,
                         "err": exc,
-                    },
+                    }
+                self.env["sync.syscom.log"].sudo().create({
+                    "name": "Error publicación background",
+                    "kind": "error",
+                    "message": detalle,
                 })
                 continue
 
