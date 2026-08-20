@@ -28,6 +28,7 @@ class SyncSyscomProductDataJob(models.Model):
     updated_templates = fields.Integer(string="Plantillas actualizadas", default=0)
     remote_fetches = fields.Integer(string="Detalles consultados a SYSCOM", default=0)
     skipped_products = fields.Integer(string="Productos omitidos", default=0)
+    failed_products = fields.Integer(string="Productos con error", default=0)
     started_at = fields.Datetime(string="Inicio")
     finished_at = fields.Datetime(string="Fin")
     last_error = fields.Text(string="Último error")
@@ -78,7 +79,7 @@ class SyncSyscomProductDataJob(models.Model):
             "name": _("Trabajo datos extendidos terminado"),
             "kind": "info",
             "message": _(
-                "Job %(job)s terminado. Revisados: %(processed)s/%(total)s. Staging: %(products)s. Plantillas: %(templates)s. Consultas remotas: %(remote)s. Omitidos: %(skipped)s."
+                "Job %(job)s terminado. Revisados: %(processed)s/%(total)s. Staging: %(products)s. Plantillas: %(templates)s. Consultas remotas: %(remote)s. Omitidos: %(skipped)s. Con error: %(failed)s."
             ) % {
                 "job": self.display_name,
                 "processed": self.processed_products,
@@ -87,6 +88,7 @@ class SyncSyscomProductDataJob(models.Model):
                 "templates": self.updated_templates,
                 "remote": self.remote_fetches,
                 "skipped": self.skipped_products,
+                "failed": self.failed_products,
             },
         })
 
@@ -100,6 +102,27 @@ class SyncSyscomProductDataJob(models.Model):
         subject = _("Trabajo datos extendidos con error")
         full_message = "%s: %s" % (self.display_name, message)
         self.env["sync.syscom.log"].sudo().notify_admin_on_critical_error(subject, full_message)
+
+    def _enriquecer_un_producto(self, product, client):
+        """Enriquece un producto con su detalle de SYSCOM.
+
+        Devuelve la tupla ``(staging_actualizado, plantilla_actualizada)``.  Deja
+        propagar cualquier excepción: quien llama la aísla por producto.
+        """
+        Product = self.env["sync.syscom.product"]
+        detail = client.get_product_detail(product.syscom_id) or {}
+        if not Product._detail_has_extended_values(detail):
+            return False, False
+
+        Product._apply_extended_values_to_product(product, detail)
+        if isinstance(detail, dict):
+            product.write({"payload": detail, "synced_at": fields.Datetime.now(), "sync_error": False})
+
+        template = Product._find_template_for_existing_product(product)
+        if not template:
+            return True, False
+        Product._apply_extended_values_to_template(template, detail, staging_product=product)
+        return True, True
 
     def _process_batch(self):
         self.ensure_one()
@@ -130,23 +153,39 @@ class SyncSyscomProductDataJob(models.Model):
         updated_templates = 0
         remote_fetches = 0
         skipped_products = 0
+        failed_products = 0
 
         for product in batch_products:
             client = client or Product._get_client()
-            detail = client.get_product_detail(product.syscom_id) or {}
+            # Se cuenta la llamada, no el acierto: un 404 gasta cuota igual que un 200.
             remote_fetches += 1
-            if not Product._detail_has_extended_values(detail):
-                skipped_products += 1
+            try:
+                # Savepoint por producto. Si el fallo es de base de datos y no de la
+                # API, sin él el cursor queda abortado y el write del except revienta
+                # con InFailedSqlTransaction, que es volver a matar el lote entero por
+                # otra vía.
+                with self.env.cr.savepoint():
+                    staging_ok, template_ok = self._enriquecer_un_producto(product, client)
+            except Exception as exc:
+                failed_products += 1
+                product.write({"sync_error": str(exc)})
+                self.env["sync.syscom.log"].sudo().create({
+                    "name": _("Error datos extendidos (producto)"),
+                    "kind": "error",
+                    "message": _("Job %(job)s. %(label)s [%(syscom)s]. Error: %(err)s.") % {
+                        "job": self.display_name,
+                        "label": product.name or product.syscom_id,
+                        "syscom": product.syscom_id,
+                        "err": exc,
+                    },
+                })
                 continue
 
-            Product._apply_extended_values_to_product(product, detail)
-            if isinstance(detail, dict):
-                product.write({"payload": detail, "synced_at": fields.Datetime.now(), "sync_error": False})
-            updated_products += 1
-
-            template = Product._find_template_for_existing_product(product)
-            if template:
-                Product._apply_extended_values_to_template(template, detail, staging_product=product)
+            if staging_ok:
+                updated_products += 1
+            else:
+                skipped_products += 1
+            if template_ok:
                 updated_templates += 1
 
         next_offset = offset + len(batch_products)
@@ -159,13 +198,15 @@ class SyncSyscomProductDataJob(models.Model):
             "updated_templates": self.updated_templates + updated_templates,
             "remote_fetches": self.remote_fetches + remote_fetches,
             "skipped_products": self.skipped_products + skipped_products,
+            "failed_products": self.failed_products + failed_products,
         })
 
         self.env["sync.syscom.log"].sudo().create({
             "name": _("Trabajo datos extendidos (batch)"),
-            "kind": "info",
+            # Un lote con productos caídos no se entierra entre los info de rutina.
+            "kind": "warn" if failed_products else "info",
             "message": _(
-                "Job %(job)s batch. Revisados: %(processed)s, staging: %(products)s, plantillas: %(templates)s, remoto: %(remote)s, omitidos: %(skipped)s. Offset: %(offset)s/%(total)s."
+                "Job %(job)s batch. Revisados: %(processed)s, staging: %(products)s, plantillas: %(templates)s, remoto: %(remote)s, omitidos: %(skipped)s, con error: %(failed)s. Offset: %(offset)s/%(total)s."
             ) % {
                 "job": self.display_name,
                 "processed": len(batch_products),
@@ -173,6 +214,7 @@ class SyncSyscomProductDataJob(models.Model):
                 "templates": updated_templates,
                 "remote": remote_fetches,
                 "skipped": skipped_products,
+                "failed": failed_products,
                 "offset": 0 if done else next_offset,
                 "total": total,
             },
