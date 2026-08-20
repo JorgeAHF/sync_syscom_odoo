@@ -1832,15 +1832,22 @@ class SyscomProduct(models.Model):
         abandoned = 0
         for prod in pending:
             try:
-                detail = client.get_product_detail(prod.syscom_id) or {}
-                _template, _created, low_stock_note = self._publish_one_from_detail(prod, detail, params, exchange_rate, exchange_rate_date, price_currency)
-                prod.write({
-                    "publish_state": "done",
-                    "publish_done_at": fields.Datetime.now(),
-                    "publish_retry_count": 0,
-                    "selected": False,
-                    "sync_error": low_stock_note or False,
-                })
+                # Savepoint por producto. Sin el, un fallo de base de datos (el
+                # SerializationFailure que sale cuando el cron 66 encola mientras este
+                # publica) deja el cursor abortado y entonces revienta el propio write
+                # del except: se pierde el lote entero y no queda ni rastro en el log.
+                # Ademas fuerza el flush aqui dentro, asi que un choque de escritura se
+                # atribuye a su producto en vez de tumbar el cron en el flush final.
+                with self.env.cr.savepoint():
+                    detail = client.get_product_detail(prod.syscom_id) or {}
+                    _template, _created, low_stock_note = self._publish_one_from_detail(prod, detail, params, exchange_rate, exchange_rate_date, price_currency)
+                    prod.write({
+                        "publish_state": "done",
+                        "publish_done_at": fields.Datetime.now(),
+                        "publish_retry_count": 0,
+                        "selected": False,
+                        "sync_error": low_stock_note or False,
+                    })
                 ok += 1
             except Exception as exc:
                 err += 1
