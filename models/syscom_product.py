@@ -15,8 +15,10 @@ from .job_feedback import (
 )
 from .syscom_client import SyscomRateLimitError
 
-# Ruta de pausa de la publicación en background (cron 60).
-RUTA_PUBLICAR = "publicar_seleccionados"
+# Rutas de pausa por rate limit. Una por cron que sale a la API: el 429 es global, pero
+# pausar la ruta entera es lo que impide que cada cron vuelva a intentarlo al minuto.
+RUTA_PUBLICAR = "publicar_seleccionados"   # cron 60
+RUTA_STOCK = "refresco_stock"              # cron 58
 
 from .constants import (
     SYSCOM_DEFAULT_BASE_URL,
@@ -1195,10 +1197,24 @@ class SyscomProduct(models.Model):
             except (TypeError, ValueError):
                 pass
 
+        # Este cron corre cada 15 min: sin esta comprobación volvería a la API en cuanto
+        # SYSCOM lo hubiera echado con un 429.
+        if segundos_de_pausa_restantes(self.env, RUTA_STOCK):
+            return
+
         client = self._get_client()
 
-        # Tipo de cambio (una semana) por lote
-        rate_payload = client.get_exchange_rate() or {}
+        # Tipo de cambio (una semana) por lote. Va antes de las dos pasadas, así que un
+        # 429 aquí dejaba morir el cron entero sin pausar nada ni dejar rastro propio.
+        try:
+            rate_payload = client.get_exchange_rate() or {}
+        except SyscomRateLimitError as exc:
+            aplazar_por_rate_limit(
+                self.env, RUTA_STOCK, exc, "Refresco de stock/precios (tipo de cambio)",
+                cron_xmlid="sync_syscom.cron_sync_syscom_stock_daily",
+                con_tope=False,
+            )
+            return
         try:
             exchange_rate = float(rate_payload.get("una_semana") or rate_payload.get("normal") or 1.0)
         except (TypeError, ValueError):
@@ -1209,6 +1225,8 @@ class SyscomProduct(models.Model):
         # 1) Refresh staging "selected" (mantener info interna)
         selected = self._get_marked_for_batch()
         updated = failed = 0
+        staging_fallidos = 0
+        rate_limit = None
         for prod in selected:
             try:
                 detail = client.get_product_detail(prod.syscom_id) or {}
@@ -1245,12 +1263,16 @@ class SyscomProduct(models.Model):
                     "sync_error": False,
                 })
                 self._apply_extended_values_to_product(prod, detail)
+            except SyscomRateLimitError as exc:
+                rate_limit = exc
+                break
             except Exception as exc:
                 # OJO: aquí NO se escribe `synced_at`. Un intento fallido no sincronizó
                 # nada, así que ponerle la fecha de ahora convierte el campo en una
                 # mentira: dice "actualizado hace un minuto" sobre datos viejos, y el
                 # valor bueno se pierde para siempre (el campo no lleva tracking).
                 prod.write({"sync_error": str(exc)})
+                staging_fallidos += 1
 
         # 2) Refresh product.template publicados (eCommerce) -- POR LOTES
         Template = self.env["product.template"].sudo()
@@ -1283,82 +1305,114 @@ class SyscomProduct(models.Model):
             params.set_param("sync_syscom.stock_refresh_last_id", "0")
             templates = Template.search(base_domain, order="id", limit=batch_size)
 
-        for tmpl in templates:
+        atendidas = Template.browse()
+        sin_proveedor = 0
+        retirados = 0
+
+        # Si la pasada 1 ya chocó con el rate limit, no se insiste con las 200 de esta.
+        for tmpl in (templates if not rate_limit else Template.browse()):
             if not tmpl._has_syscom_vendor():
+                sin_proveedor += 1
                 continue
+            atendidas |= tmpl
             try:
-                detail = client.get_product_detail(tmpl.syscom_product_id) or {}
-                existencia = detail.get("existencia") or {}
-                stock_new = int(existencia.get("nuevo") or 0)
+                # Savepoint por plantilla: si el fallo es de base de datos, sin él el
+                # cursor queda abortado y el write del except revienta, matando el lote
+                # entero. Mismo patrón que 4ac7507 y 6c74242.
+                with self.env.cr.savepoint():
+                    detail = client.get_product_detail(tmpl.syscom_product_id) or {}
+                    existencia = detail.get("existencia") or {}
+                    stock_new = int(existencia.get("nuevo") or 0)
 
-                unidad = detail.get("unidad_de_medida") or {}
-                uom_sat = (unidad.get("clave_unidad_sat") or "").strip()
-                sat_key = detail.get("sat_key") or detail.get("sat") or ""
-                sat_description = detail.get("sat_description") or ""
+                    unidad = detail.get("unidad_de_medida") or {}
+                    uom_sat = (unidad.get("clave_unidad_sat") or "").strip()
+                    sat_key = detail.get("sat_key") or detail.get("sat") or ""
+                    sat_description = detail.get("sat_description") or ""
 
-                precios = detail.get("precios") or {}
-                price_list = self._to_float(precios.get("precio_lista"))
-                price_special = self._to_float(precios.get("precio_especial"))
-                price_discounts = self._to_float(precios.get("precio_descuento") or precios.get("precio_descuentos"))
-                if price_currency == "usd":
-                    price_list_mxn = price_list * exchange_rate
-                    price_special_mxn = price_special * exchange_rate
-                    price_discounts_mxn = price_discounts * exchange_rate
-                else:
-                    price_list_mxn = price_list
-                    price_special_mxn = price_special
-                    price_discounts_mxn = price_discounts
+                    precios = detail.get("precios") or {}
+                    price_list = self._to_float(precios.get("precio_lista"))
+                    price_special = self._to_float(precios.get("precio_especial"))
+                    price_discounts = self._to_float(precios.get("precio_descuento") or precios.get("precio_descuentos"))
+                    if price_currency == "usd":
+                        price_list_mxn = price_list * exchange_rate
+                        price_special_mxn = price_special * exchange_rate
+                        price_discounts_mxn = price_discounts * exchange_rate
+                    else:
+                        price_list_mxn = price_list
+                        price_special_mxn = price_special
+                        price_discounts_mxn = price_discounts
 
-                tmpl.write({
-                    "list_price": price_list_mxn,
-                    "syscom_stock_new": stock_new,
-                    "syscom_stock_synced_at": now,
-                    "syscom_api_ok": True,
-                    "syscom_sync_error": False,
-                    "syscom_uom_sat": uom_sat or False,
-                })
-                self._sync_template_unspsc_from_sat(tmpl, sat_key, sat_description)
-                self._sync_template_uom_from_sat(tmpl, uom_sat)
-                self._update_template_pricelists_and_cost(tmpl, {
-                    "list_price_mxn": price_list_mxn,
-                    "special_price_mxn": price_special_mxn,
-                    "discount_price_mxn": price_discounts_mxn,
-                }, params)
-                staging_product = self.search([("syscom_id", "=", tmpl.syscom_product_id)], limit=1)
-                if staging_product:
-                    self._apply_extended_values_to_product(staging_product, detail)
-                self._apply_extended_values_to_template(tmpl, detail, staging_product=staging_product)
-                # Enforce documents visibility on the website (URLs from SYSCOM resources)
-                self._ensure_template_documents_published(tmpl)
-                # Blindaje: si HERGON tiene stock propio en bodega, el producto
-                # no se despublica aunque SYSCOM no alcance el minimo.
-                stock_propio = getattr(tmpl, 'syscom_stock_propio', 0) or 0
-                stock_ok = (stock_new >= min_stock) or (stock_propio > 0)
-                currently_published = getattr(tmpl, "is_published", False)
-                if stock_ok and not currently_published:
-                    self._ensure_template_published_on_website(tmpl)
-                elif not stock_ok and currently_published and "is_published" in tmpl._fields:
-                    tmpl.write({"is_published": False})
+                    tmpl.write({
+                        "list_price": price_list_mxn,
+                        "syscom_stock_new": stock_new,
+                        "syscom_stock_synced_at": now,
+                        "syscom_api_ok": True,
+                        "syscom_sync_error": False,
+                        "syscom_uom_sat": uom_sat or False,
+                    })
+                    self._sync_template_unspsc_from_sat(tmpl, sat_key, sat_description)
+                    self._sync_template_uom_from_sat(tmpl, uom_sat)
+                    self._update_template_pricelists_and_cost(tmpl, {
+                        "list_price_mxn": price_list_mxn,
+                        "special_price_mxn": price_special_mxn,
+                        "discount_price_mxn": price_discounts_mxn,
+                    }, params)
+                    staging_product = self.search([("syscom_id", "=", tmpl.syscom_product_id)], limit=1)
+                    if staging_product:
+                        self._apply_extended_values_to_product(staging_product, detail)
+                    self._apply_extended_values_to_template(tmpl, detail, staging_product=staging_product)
+                    # Enforce documents visibility on the website (URLs from SYSCOM resources)
+                    self._ensure_template_documents_published(tmpl)
+                    # Blindaje: si HERGON tiene stock propio en bodega, el producto
+                    # no se despublica aunque SYSCOM no alcance el minimo.
+                    stock_propio = getattr(tmpl, 'syscom_stock_propio', 0) or 0
+                    stock_ok = (stock_new >= min_stock) or (stock_propio > 0)
+                    currently_published = getattr(tmpl, "is_published", False)
+                    if stock_ok and not currently_published:
+                        self._ensure_template_published_on_website(tmpl)
+                    elif not stock_ok and currently_published and "is_published" in tmpl._fields:
+                        tmpl.write({"is_published": False})
                 updated += 1
+            except SyscomRateLimitError as exc:
+                # Caso 1 de 3: la API está saturada. No dice NADA de esta plantilla, así
+                # que no se la marca como fallida ni se toca su estado. Se corta el lote
+                # y se pausa la ruta; el resto del lote se reintenta enseguida en vez de
+                # esperar el ciclo completo de ~7 h.
+                atendidas -= tmpl
+                rate_limit = exc
+                break
             except Exception as exc:
-                # Misma razón que en la pasada 1: `syscom_stock_synced_at` significa
-                # "cuándo se refrescó el stock", y un fallo no lo refrescó. Escribirlo
-                # aquí es lo que dejó 331 plantillas diciendo que estaban al día cuando
-                # muestran existencias sin verificar. `syscom_api_ok = False` sí es
-                # verdad y se queda.
-                tmpl.write({"syscom_api_ok": False, "syscom_sync_error": str(exc)})
+                mensaje_error = str(exc)
+                definitivo = self._es_error_definitivo(mensaje_error)
+                if definitivo:
+                    # Caso 2 de 3: SYSCOM retiró el producto de su catálogo. Se deja
+                    # identificado y NO se despublica: eso es una decisión comercial.
+                    retirados += 1
+                # Caso 3 de 3: fallo real de sincronización.
+                # En los dos, `syscom_stock_synced_at` NO se toca — ver el commit
+                # anterior. `syscom_api_ok = False` sí es verdad y se queda.
                 failed += 1
+                tmpl.write({"syscom_api_ok": False, "syscom_sync_error": mensaje_error})
                 self.env["sync.syscom.log"].sudo().create({
                     "name": "Error refresco stock (plantilla)",
                     "kind": "error",
-                    "message": "%(label)s [%(syscom)s]. Error: %(err)s." % {
+                    "message": "%(label)s [%(syscom)s]. %(nota)sError: %(err)s." % {
                         "label": tmpl.display_name,
                         "syscom": tmpl.syscom_product_id,
+                        "nota": "Retirado de SYSCOM, sigue publicado. " if definitivo else "",
                         "err": exc,
                     },
                 })
 
-        if templates:
+        # El cursor avanza solo hasta la última plantilla realmente atendida. Antes usaba
+        # `templates[-1].id` pasara lo que pasara: cuando un 429 tumbaba 84 plantillas
+        # seguidas, el cursor pasaba sobre las 84 y no volvían hasta el ciclo completo
+        # siguiente, ~7 h después.
+        if atendidas:
+            params.set_param("sync_syscom.stock_refresh_last_id", str(atendidas[-1].id))
+        elif templates and not rate_limit:
+            # Lote entero sin proveedor SYSCOM: hay que avanzar igual o el cursor se
+            # queda clavado en él para siempre.
             params.set_param("sync_syscom.stock_refresh_last_id", str(templates[-1].id))
         params.set_param("sync_syscom.stock_refresh_last_run", fields.Datetime.to_string(now))
 
@@ -1371,6 +1425,15 @@ class SyscomProduct(models.Model):
                 "s": len(selected),
             },
         })
+
+        if rate_limit:
+            aplazar_por_rate_limit(
+                self.env, RUTA_STOCK, rate_limit, "Refresco de stock/precios",
+                cron_xmlid="sync_syscom.cron_sync_syscom_stock_daily",
+                con_tope=False,
+            )
+        else:
+            reiniciar_aplazamientos(self.env, RUTA_STOCK)
 
     def action_publish_selected(self):
         """Enriquece productos seleccionados con detalle, convierte MXN y publica en product.template."""
