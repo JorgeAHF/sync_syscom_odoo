@@ -126,12 +126,26 @@ def aplazar_por_rate_limit(env, ruta, exc, etiqueta, cron_xmlid=None, con_tope=T
     params.set_param(_clave_pausa(ruta), fields.Datetime.to_string(ahora + timedelta(seconds=espera)))
     params.set_param(_clave_aplazamientos(ruta), str(previos + 1))
 
-    # El _trigger es para cuando el cron tenga un intervalo largo: asegura que
-    # vuelva justo al abrirse la ventana en vez de esperar a su siguiente horario.
+    # El _trigger sirve para que el cron vuelva justo al abrirse la ventana en vez de
+    # esperar a su siguiente horario.
+    #
+    # PERO NUNCA PARA ADELANTARLO. `_trigger` AÑADE disparos, no retrasa el horario
+    # normal, así que en un cron de intervalo largo lo acelera. Medido el 21/08/2026: el
+    # cron 58 (cada 15 min) entró en bucle —429 al final del lote, pausa de 120 s,
+    # trigger a los 125 s, otra vez 429— y pasó de 97 corridas al día a 494, con ~125,000
+    # llamadas diarias contra las ~19,300 de antes. 480 de 524 corridas acabaron
+    # cortadas por 429.
+    #
+    # La regla: disparar solo si la ventana se abre DESPUÉS de su próximo horario. Si se
+    # abre antes, el propio `nextcall` ya lo trae de vuelta y la comprobación de pausa
+    # del principio se encarga de que no salga a la API hasta que toque.
     if cron_xmlid:
         cron = env.ref(cron_xmlid, raise_if_not_found=False)
         if cron:
-            cron.sudo()._trigger(at=ahora + timedelta(seconds=espera + 5))
+            cron = cron.sudo()
+            cuando = ahora + timedelta(seconds=espera + 5)
+            if not cron.nextcall or cuando > cron.nextcall:
+                cron._trigger(at=cuando)
 
     tiene_cabecera = getattr(exc, "retry_after", None) is not None
     env["sync.syscom.log"].sudo().create({
