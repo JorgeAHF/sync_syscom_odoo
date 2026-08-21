@@ -59,6 +59,36 @@ def segundos_de_espera_efectivos(env, retry_after=None, aplazamientos=0):
 # retrasa el horario normal, asi que sin esta pausa el cron volveria a la API 60 s
 # despues del 429 igualmente.
 
+_SEGUNDOS_POR_INTERVALO = {
+    "minutes": 60,
+    "hours": 3600,
+    "days": 86400,
+    "weeks": 604800,
+    "months": 2592000,   # aproximado; solo se usa para comparar, no para programar
+}
+
+
+def _proximo_horario_natural(cron, ahora):
+    """Cuándo volvería a dispararse el cron por su propio horario.
+
+    NO vale con leer ``cron.nextcall`` a secas. Dentro del callback, ``nextcall``
+    todavía apunta a la ranura que se acaba de ejecutar —Odoo lo avanza al terminar—,
+    así que está en el pasado y cualquier comparación contra él sale que sí. Ese fue
+    el fallo del primer intento de arreglo el 21/08/2026: seguía disparando.
+
+    Se avanza en intervalos enteros hasta pasar de ``ahora``, que es lo que hará Odoo.
+    """
+    proximo = cron.nextcall
+    if not proximo:
+        return None
+    intervalo = (cron.interval_number or 0) * _SEGUNDOS_POR_INTERVALO.get(cron.interval_type, 0)
+    if intervalo <= 0:
+        return proximo
+    while proximo <= ahora:
+        proximo += timedelta(seconds=intervalo)
+    return proximo
+
+
 def _clave_pausa(ruta):
     return "sync_syscom.rate_limit_pausa_hasta.%s" % ruta
 
@@ -144,7 +174,8 @@ def aplazar_por_rate_limit(env, ruta, exc, etiqueta, cron_xmlid=None, con_tope=T
         if cron:
             cron = cron.sudo()
             cuando = ahora + timedelta(seconds=espera + 5)
-            if not cron.nextcall or cuando > cron.nextcall:
+            proximo = _proximo_horario_natural(cron, ahora)
+            if not proximo or cuando > proximo:
                 cron._trigger(at=cuando)
 
     tiene_cabecera = getattr(exc, "retry_after", None) is not None
