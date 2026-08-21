@@ -48,6 +48,19 @@ class ProductTemplate(models.Model):
         help="Último estado de validación/refresh contra SYSCOM para este producto.",
         default=True,
     )
+    syscom_404_consecutivos = fields.Integer(
+        string="404 seguidos",
+        default=0,
+        help="Cuántos refrescos seguidos han recibido HTTP 404 de SYSCOM. Se limpia con "
+             "cualquier refresco bueno. Un 429 no lo toca: no dice nada del producto.",
+    )
+    syscom_404_desde = fields.Datetime(
+        string="Retirado desde",
+        help="Cuándo empezó la racha actual de 404. Junto al contador decide la "
+             "despublicación automática: hacen falta las dos condiciones porque un "
+             "contador solo mide intentos, y el número de intentos depende de que el "
+             "cron corra a su ritmo.",
+    )
     syscom_sync_error = fields.Text(
         string="Último error SYSCOM",
         help="Motivo del último refresco fallido contra SYSCOM. Se limpia en cuanto "

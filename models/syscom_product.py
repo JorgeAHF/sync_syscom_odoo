@@ -1,6 +1,8 @@
+from datetime import timedelta
+from urllib.parse import urlparse, urlunparse
+
 from odoo import _, fields, models
 from odoo.exceptions import UserError
-from urllib.parse import urlparse, urlunparse
 
 from .job_feedback import (
     CRON_PUBLICAR,
@@ -21,6 +23,8 @@ RUTA_PUBLICAR = "publicar_seleccionados"   # cron 60
 RUTA_STOCK = "refresco_stock"              # cron 58
 
 from .constants import (
+    DEFAULT_RETIRADO_404_MIN_HORAS,
+    DEFAULT_RETIRADO_404_MIN_INTENTOS,
     SYSCOM_DEFAULT_BASE_URL,
     SYSCOM_DEFAULT_TIMEOUT,
     DEFAULT_PUBLISH_BATCH_SIZE,
@@ -1308,6 +1312,7 @@ class SyscomProduct(models.Model):
         atendidas = Template.browse()
         sin_proveedor = 0
         retirados = 0
+        despublicados = 0
 
         # Si la pasada 1 ya chocó con el rate limit, no se insiste con las 200 de esta.
         for tmpl in (templates if not rate_limit else Template.browse()):
@@ -1348,6 +1353,10 @@ class SyscomProduct(models.Model):
                         "syscom_stock_synced_at": now,
                         "syscom_api_ok": True,
                         "syscom_sync_error": False,
+                        # Un refresco bueno prueba que el producto vive: la racha de
+                        # 404 se corta aquí y solo aquí.
+                        "syscom_404_consecutivos": 0,
+                        "syscom_404_desde": False,
                         "syscom_uom_sat": uom_sat or False,
                     })
                     self._sync_template_unspsc_from_sat(tmpl, sat_key, sat_description)
@@ -1384,22 +1393,36 @@ class SyscomProduct(models.Model):
             except Exception as exc:
                 mensaje_error = str(exc)
                 definitivo = self._es_error_definitivo(mensaje_error)
-                if definitivo:
-                    # Caso 2 de 3: SYSCOM retiró el producto de su catálogo. Se deja
-                    # identificado y NO se despublica: eso es una decisión comercial.
-                    retirados += 1
                 # Caso 3 de 3: fallo real de sincronización.
                 # En los dos, `syscom_stock_synced_at` NO se toca — ver el commit
                 # anterior. `syscom_api_ok = False` sí es verdad y se queda.
                 failed += 1
-                tmpl.write({"syscom_api_ok": False, "syscom_sync_error": mensaje_error})
+                vals = {"syscom_api_ok": False, "syscom_sync_error": mensaje_error}
+                nota = ""
+
+                if definitivo:
+                    # Caso 2 de 3: SYSCOM retiró el producto de su catálogo.
+                    retirados += 1
+                    vals["syscom_404_consecutivos"] = (tmpl.syscom_404_consecutivos or 0) + 1
+                    if not tmpl.syscom_404_desde:
+                        vals["syscom_404_desde"] = now
+                    if self._toca_despublicar_retirado(tmpl, vals, params, now):
+                        vals["is_published"] = False
+                        despublicados += 1
+                        nota = "Retirado de SYSCOM, DESPUBLICADO. "
+                    else:
+                        nota = "Retirado de SYSCOM, sigue publicado. "
+                # Un error que no sea 404 no toca los contadores de retirada: no prueba
+                # que el producto viva, así que tampoco corta la racha.
+
+                tmpl.write(vals)
                 self.env["sync.syscom.log"].sudo().create({
                     "name": "Error refresco stock (plantilla)",
                     "kind": "error",
                     "message": "%(label)s [%(syscom)s]. %(nota)sError: %(err)s." % {
                         "label": tmpl.display_name,
                         "syscom": tmpl.syscom_product_id,
-                        "nota": "Retirado de SYSCOM, sigue publicado. " if definitivo else "",
+                        "nota": nota,
                         "err": exc,
                     },
                 })
@@ -1425,6 +1448,8 @@ class SyscomProduct(models.Model):
             partes.append("fallidas: %s (de ellas retiradas de SYSCOM: %s)" % (failed, retirados))
         else:
             partes.append("fallidas: 0")
+        if despublicados:
+            partes.append("DESPUBLICADAS por retirada confirmada: %s" % despublicados)
         if sin_proveedor:
             partes.append("saltadas sin proveedor SYSCOM: %s" % sin_proveedor)
         partes.append("staging marcados en lote: %s" % len(selected))
@@ -1858,6 +1883,47 @@ class SyscomProduct(models.Model):
             return max(1, int(params.get_param("sync_syscom.publish_max_retries") or DEFAULT_PUBLISH_MAX_RETRIES))
         except (TypeError, ValueError):
             return DEFAULT_PUBLISH_MAX_RETRIES
+
+    def _toca_despublicar_retirado(self, tmpl, vals, params, ahora):
+        """True si esta plantilla retirada ya cumple las dos condiciones para salir de la tienda.
+
+        Se exigen **las dos** a propósito:
+
+        - ``retirado_404_min_intentos`` (3): un 404 suelto podría ser un fallo de
+          enrutado de la API, y despublicar se le nota al cliente.
+        - ``retirado_404_min_horas`` (24): un contador mide *intentos*, y el número de
+          intentos depende de que el cron corra a su ritmo. El 21/08/2026 el cron 58
+          llegó a correr 5 veces de más por un `_trigger` mal puesto; con solo contador,
+          el umbral de 3 se habría alcanzado en horas en vez de en un día.
+
+        Y al revés: solo con la condición de tiempo, un cron parado dos días
+        despublicaría con una sola confirmación al volver. Por eso las dos.
+
+        El blindaje de stock propio de HERGON manda sobre todo lo demás: si hay
+        existencia en bodega, el producto se queda publicado aunque SYSCOM lo haya
+        retirado, porque se puede vender igual.
+        """
+        if not getattr(tmpl, "is_published", False) or "is_published" not in tmpl._fields:
+            return False
+        if (getattr(tmpl, "syscom_stock_propio", 0) or 0) > 0:
+            return False
+
+        try:
+            min_intentos = int(params.get_param("sync_syscom.retirado_404_min_intentos") or DEFAULT_RETIRADO_404_MIN_INTENTOS)
+        except (TypeError, ValueError):
+            min_intentos = DEFAULT_RETIRADO_404_MIN_INTENTOS
+        try:
+            min_horas = float(params.get_param("sync_syscom.retirado_404_min_horas") or DEFAULT_RETIRADO_404_MIN_HORAS)
+        except (TypeError, ValueError):
+            min_horas = DEFAULT_RETIRADO_404_MIN_HORAS
+
+        if (vals.get("syscom_404_consecutivos") or 0) < max(min_intentos, 1):
+            return False
+
+        desde = vals.get("syscom_404_desde") or tmpl.syscom_404_desde
+        if not desde:
+            return False
+        return (ahora - desde) >= timedelta(hours=max(min_horas, 0))
 
     @staticmethod
     def _es_error_definitivo(mensaje):
