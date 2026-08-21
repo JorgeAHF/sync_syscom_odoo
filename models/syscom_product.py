@@ -1175,14 +1175,36 @@ class SyscomProduct(models.Model):
         })
 
     def cron_update_stock_selected(self):
-        """Cron background: refresca stock (nuevo), precios y costo de productos SYSCOM publicados.
+        """Cron background: refresca stock (nuevo), precios y costo de productos SYSCOM.
 
-        El cron puede ejecutarse con frecuencia corta, pero se "salta" si aún no toca según settings.
+        Orquestador. El trabajo de verdad esta en cuatro metodos, uno por etapa, porque
+        aqui vivian ~300 lineas con dos pasadas que compartian contadores, tres
+        compuertas y la gestion del cursor repartida en cuatro sitios.
         """
         params = self.env["ir.config_parameter"].sudo()
+        now = fields.Datetime.now()
+
+        if not self._debe_correr_el_refresco(params, now):
+            return
+
+        client = self._get_client()
+        contexto = self._contexto_del_lote(client, params)
+        if contexto is None:
+            return   # 429 en el tipo de cambio: la ruta ya quedo pausada
+        exchange_rate, price_currency, min_stock = contexto
+
+        r1 = self._refrescar_staging_marcados(client, params, exchange_rate, price_currency, now)
+        r2 = self._refrescar_plantillas_lote(
+            client, params, exchange_rate, price_currency, min_stock, now,
+            rate_limit_previo=r1["rate_limit"],
+        )
+        self._cerrar_corrida_de_refresco(params, now, r1, r2)
+
+    def _debe_correr_el_refresco(self, params, now):
+        """Las compuertas que deciden si esta corrida hace algo. Antes estaban sueltas."""
         enabled_raw = params.get_param("sync_syscom.stock_refresh_enabled")
         if str(enabled_raw).strip().lower() in ("false", "0", "no", ""):
-            return
+            return False
 
         try:
             hours = float(params.get_param("sync_syscom.stock_refresh_hours") or 4)
@@ -1191,25 +1213,26 @@ class SyscomProduct(models.Model):
         if hours < 0:
             hours = 0
 
-        now = fields.Datetime.now()
         last_run = params.get_param("sync_syscom.stock_refresh_last_run")
         if last_run:
             try:
                 last_dt = fields.Datetime.from_string(last_run)
                 if last_dt and (now - last_dt).total_seconds() < hours * 3600:
-                    return
+                    return False
             except (TypeError, ValueError):
                 pass
 
         # Este cron corre cada 15 min: sin esta comprobación volvería a la API en cuanto
         # SYSCOM lo hubiera echado con un 429.
         if segundos_de_pausa_restantes(self.env, RUTA_STOCK):
-            return
+            return False
 
-        client = self._get_client()
+        return True
 
-        # Tipo de cambio (una semana) por lote. Va antes de las dos pasadas, así que un
-        # 429 aquí dejaba morir el cron entero sin pausar nada ni dejar rastro propio.
+    def _contexto_del_lote(self, client, params):
+        """Tipo de cambio y ajustes que comparten las dos pasadas. None si hubo 429."""
+        # Va antes de las dos pasadas, así que un 429 aquí dejaba morir el cron entero
+        # sin pausar nada ni dejar rastro propio.
         try:
             rate_payload = client.get_exchange_rate() or {}
         except SyscomRateLimitError as exc:
@@ -1218,17 +1241,19 @@ class SyscomProduct(models.Model):
                 cron_xmlid="sync_syscom.cron_sync_syscom_stock_daily",
                 con_tope=False,
             )
-            return
+            return None
         try:
             exchange_rate = float(rate_payload.get("una_semana") or rate_payload.get("normal") or 1.0)
         except (TypeError, ValueError):
             exchange_rate = 1.0
         price_currency = params.get_param("sync_syscom.price_currency") or "usd"
         min_stock = max(1, int(params.get_param("sync_syscom.min_stock") or 1))
+        return exchange_rate, price_currency, min_stock
 
-        # 1) Refresh staging "selected" (mantener info interna)
+    def _refrescar_staging_marcados(self, client, params, exchange_rate, price_currency, now):
+        """Pasada 1: refresca los `sync.syscom.product` marcados en lote."""
+
         selected = self._get_marked_for_batch()
-        updated = failed = 0
         staging_fallidos = 0
         rate_limit = None
         for prod in selected:
@@ -1278,7 +1303,19 @@ class SyscomProduct(models.Model):
                 prod.write({"sync_error": str(exc)})
                 staging_fallidos += 1
 
-        # 2) Refresh product.template publicados (eCommerce) -- POR LOTES
+
+        return {"selected": selected, "staging_fallidos": staging_fallidos, "rate_limit": rate_limit}
+
+    def _refrescar_plantillas_lote(self, client, params, exchange_rate, price_currency,
+                                   min_stock, now, rate_limit_previo=None):
+        """Pasada 2: refresca un lote de `product.template`. Es la que alimenta la tienda."""
+        rate_limit = rate_limit_previo
+        # `updated` y `failed` se inicializaban en la pasada 1 y se incrementaban aquí:
+        # dos pasadas distintas compartiendo contadores. La extracción lo destapó.
+        # Los valores que contaban siempre fueron los de esta pasada, así que arrancan
+        # en cero aquí y el resumen sigue diciendo lo mismo.
+        updated = failed = 0
+
         Template = self.env["product.template"].sudo()
 
         try:
@@ -1431,6 +1468,24 @@ class SyscomProduct(models.Model):
         # `templates[-1].id` pasara lo que pasara: cuando un 429 tumbaba 84 plantillas
         # seguidas, el cursor pasaba sobre las 84 y no volvían hasta el ciclo completo
         # siguiente, ~7 h después.
+
+        return {
+            "templates": templates, "atendidas": atendidas, "updated": updated,
+            "failed": failed, "retirados": retirados, "despublicados": despublicados,
+            "sin_proveedor": sin_proveedor, "rate_limit": rate_limit,
+        }
+
+    def _cerrar_corrida_de_refresco(self, params, now, r1, r2):
+        """Avanza el cursor, escribe el resumen y aplaza la ruta si hubo 429."""
+        templates = r2["templates"]
+        atendidas = r2["atendidas"]
+        rate_limit = r2["rate_limit"]
+        updated, failed = r2["updated"], r2["failed"]
+        retirados, despublicados = r2["retirados"], r2["despublicados"]
+        sin_proveedor = r2["sin_proveedor"]
+        selected, staging_fallidos = r1["selected"], r1["staging_fallidos"]
+
+
         if atendidas:
             params.set_param("sync_syscom.stock_refresh_last_id", str(atendidas[-1].id))
         elif templates and not rate_limit:
