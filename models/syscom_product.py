@@ -25,6 +25,7 @@ RUTA_STOCK = "refresco_stock"              # cron 58
 from .constants import (
     DEFAULT_RETIRADO_404_MIN_HORAS,
     DEFAULT_RETIRADO_404_MIN_INTENTOS,
+    DEFAULT_STOCK_REFRESH_CYCLE_DAYS,
     SYSCOM_DEFAULT_BASE_URL,
     SYSCOM_DEFAULT_TIMEOUT,
     DEFAULT_PUBLISH_BATCH_SIZE,
@@ -1201,26 +1202,22 @@ class SyscomProduct(models.Model):
         self._cerrar_corrida_de_refresco(params, now, r1, r2)
 
     def _debe_correr_el_refresco(self, params, now):
-        """Las compuertas que deciden si esta corrida hace algo. Antes estaban sueltas."""
+        """Las compuertas que deciden si esta corrida hace algo.
+
+        **Se comprueban todas ANTES de tocar la API**, y eso no es un detalle de estilo:
+        `_contexto_del_lote` pide el tipo de cambio, así que una compuerta puesta después
+        gastaría una llamada cada 15 minutos durante toda la semana de descanso —672 por
+        semana— sin refrescar absolutamente nada.
+        """
         enabled_raw = params.get_param("sync_syscom.stock_refresh_enabled")
         if str(enabled_raw).strip().lower() in ("false", "0", "no", ""):
             return False
 
-        try:
-            hours = float(params.get_param("sync_syscom.stock_refresh_hours") or 4)
-        except (TypeError, ValueError):
-            hours = 4
-        if hours < 0:
-            hours = 0
-
-        last_run = params.get_param("sync_syscom.stock_refresh_last_run")
-        if last_run:
-            try:
-                last_dt = fields.Datetime.from_string(last_run)
-                if last_dt and (now - last_dt).total_seconds() < hours * 3600:
-                    return False
-            except (TypeError, ValueError):
-                pass
+        # Descanso entre vueltas completas al catálogo. El cursor a 0 marca "entre
+        # ciclos"; si además hay fecha de cierre, se respeta la espera. Sin fecha de
+        # cierre es que nunca ha dado una vuelta, y entonces arranca ya.
+        if self._esta_descansando_entre_ciclos(params, now):
+            return False
 
         # Este cron corre cada 15 min: sin esta comprobación volvería a la API en cuanto
         # SYSCOM lo hubiera echado con un 429.
@@ -1228,6 +1225,50 @@ class SyscomProduct(models.Model):
             return False
 
         return True
+
+    def _esta_descansando_entre_ciclos(self, params, now):
+        """True mientras dure el descanso posterior a una vuelta completa al catálogo."""
+        try:
+            last_id = int(params.get_param("sync_syscom.stock_refresh_last_id") or 0)
+        except (TypeError, ValueError):
+            last_id = 0
+        if last_id:
+            return False   # ciclo a medias: nunca se descansa a mitad de vuelta
+
+        cerrado_raw = params.get_param("sync_syscom.stock_refresh_cycle_closed_at")
+        if not cerrado_raw:
+            return False
+        try:
+            cerrado = fields.Datetime.from_string(cerrado_raw)
+        except (TypeError, ValueError):
+            return False
+        if not cerrado:
+            return False
+
+        try:
+            dias = float(params.get_param("sync_syscom.stock_refresh_cycle_days")
+                         or DEFAULT_STOCK_REFRESH_CYCLE_DAYS)
+        except (TypeError, ValueError):
+            dias = DEFAULT_STOCK_REFRESH_CYCLE_DAYS
+        return (now - cerrado) < timedelta(days=max(dias, 0))
+
+    def _cerrar_ciclo_de_refresco(self, params, now):
+        """Se ha dado la vuelta entera al catálogo: cursor a 0 y a esperar."""
+        params.set_param("sync_syscom.stock_refresh_last_id", "0")
+        params.set_param("sync_syscom.stock_refresh_cycle_closed_at",
+                         fields.Datetime.to_string(now))
+        try:
+            dias = float(params.get_param("sync_syscom.stock_refresh_cycle_days")
+                         or DEFAULT_STOCK_REFRESH_CYCLE_DAYS)
+        except (TypeError, ValueError):
+            dias = DEFAULT_STOCK_REFRESH_CYCLE_DAYS
+        self.env["sync.syscom.log"].sudo().create({
+            "name": "Refresco stock/precios SYSCOM",
+            "kind": "info",
+            "message": ("Vuelta completa al catálogo terminada. El siguiente ciclo "
+                        "empieza en %s días (%s)."
+                        % (dias, fields.Datetime.to_string(now + timedelta(days=dias)))),
+        })
 
     def _contexto_del_lote(self, client, params):
         """Tipo de cambio y ajustes que comparten las dos pasadas. None si hubo 429."""
@@ -1343,8 +1384,15 @@ class SyscomProduct(models.Model):
         templates = Template.search(domain, order="id", limit=batch_size)
 
         if not templates:
-            params.set_param("sync_syscom.stock_refresh_last_id", "0")
-            templates = Template.search(base_domain, order="id", limit=batch_size)
+            # Fin de vuelta al catálogo. Antes se reiniciaba el cursor y se arrancaba el
+            # ciclo siguiente en la misma corrida, sin descanso. Ahora se cierra el ciclo
+            # y se anota la fecha: la espera la aplica `_debe_correr_el_refresco`.
+            self._cerrar_ciclo_de_refresco(params, now)
+            return {
+                "templates": Template.browse(), "atendidas": Template.browse(),
+                "updated": 0, "failed": 0, "retirados": 0, "despublicados": 0,
+                "sin_proveedor": 0, "rate_limit": None, "ciclo_cerrado": True,
+            }
 
         atendidas = Template.browse()
         sin_proveedor = 0
@@ -1485,6 +1533,10 @@ class SyscomProduct(models.Model):
         sin_proveedor = r2["sin_proveedor"]
         selected, staging_fallidos = r1["selected"], r1["staging_fallidos"]
 
+        if r2.get("ciclo_cerrado"):
+            # `_cerrar_ciclo_de_refresco` ya dejó cursor y log; no hay lote que resumir.
+            params.set_param("sync_syscom.stock_refresh_last_run", fields.Datetime.to_string(now))
+            return
 
         if atendidas:
             params.set_param("sync_syscom.stock_refresh_last_id", str(atendidas[-1].id))
@@ -1492,6 +1544,9 @@ class SyscomProduct(models.Model):
             # Lote entero sin proveedor SYSCOM: hay que avanzar igual o el cursor se
             # queda clavado en él para siempre.
             params.set_param("sync_syscom.stock_refresh_last_id", str(templates[-1].id))
+        # `stock_refresh_last_run` ya no gobierna nada: era la marca que leía la vieja
+        # compuerta de horas. Se conserva solo como dato de diagnóstico —cuándo corrió
+        # el último lote—. No lo uses para decidir si toca refrescar.
         params.set_param("sync_syscom.stock_refresh_last_run", fields.Datetime.to_string(now))
 
         # El mensaje viejo decía "actualizadas: N, fallidas: M" y nada más: no separaba
@@ -1944,15 +1999,20 @@ class SyscomProduct(models.Model):
 
         Se exigen **las dos** a propósito:
 
-        - ``retirado_404_min_intentos`` (3): un 404 suelto podría ser un fallo de
-          enrutado de la API, y despublicar se le nota al cliente.
-        - ``retirado_404_min_horas`` (24): un contador mide *intentos*, y el número de
+        - ``retirado_404_min_intentos``: un 404 suelto podría ser un fallo de enrutado
+          de la API, y despublicar se le nota al cliente.
+        - ``retirado_404_min_horas``: un contador mide *intentos*, y el número de
           intentos depende de que el cron corra a su ritmo. El 21/08/2026 el cron 58
           llegó a correr 5 veces de más por un `_trigger` mal puesto; con solo contador,
-          el umbral de 3 se habría alcanzado en horas en vez de en un día.
+          el umbral se habría alcanzado en horas en vez de en un día.
 
         Y al revés: solo con la condición de tiempo, un cron parado dos días
         despublicaría con una sola confirmación al volver. Por eso las dos.
+
+        **Con los valores de hoy (1 intento / 24 h) y ciclo semanal, el efecto real es
+        despublicar en el SEGUNDO ciclo**, o sea una semana después de la retirada: el
+        primer 404 pone la marca de inicio y la condición de horas aún no se cumple.
+        Para que despublique al primer 404 hay que poner también las horas a 0.
 
         El blindaje de stock propio de HERGON manda sobre todo lo demás: si hay
         existencia en bodega, el producto se queda publicado aunque SYSCOM lo haya

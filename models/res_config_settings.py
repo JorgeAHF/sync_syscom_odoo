@@ -1,6 +1,10 @@
-from odoo import _, fields, models
+from odoo import _, api, fields, models
 from odoo.exceptions import UserError
 
+from .constants import (
+    DEFAULT_STOCK_REFRESH_BATCH_MINUTES,
+    DEFAULT_STOCK_REFRESH_BATCH_MINUTES_MIN,
+)
 from .syscom_client import SyscomClient
 
 
@@ -69,11 +73,23 @@ class ResConfigSettings(models.TransientModel):
         config_parameter="sync_syscom.stock_refresh_enabled",
         help="Si está activo, se refresca stock (nuevo), precios y costo de productos SYSCOM publicados con una frecuencia configurable.",
     )
-    syscom_stock_refresh_hours = fields.Integer(
-        string="Frecuencia de refresco (horas)",
-        default=4,
-        config_parameter="sync_syscom.stock_refresh_hours",
-        help="Intervalo mínimo entre refrescos. El cron corre en background y se salta ejecuciones si aún no toca.",
+    syscom_stock_refresh_cycle_days = fields.Integer(
+        string="Días de espera entre ciclos",
+        default=7,
+        config_parameter="sync_syscom.stock_refresh_cycle_days",
+        help="Al terminar la vuelta completa al catálogo, el refresco descansa estos días "
+             "antes de empezar la siguiente. No frena entre lotes: frena entre ciclos.",
+    )
+    syscom_stock_refresh_batch_minutes = fields.Integer(
+        string="Minutos entre lotes",
+        # SIN `default=`: un default gana al compute en `create`/`default_get`, así que
+        # el campo enseñaba siempre 15 aunque el cron estuviera en otro intervalo.
+        # El valor de respaldo, para cuando el cron no exista, lo pone el compute.
+        compute="_compute_syscom_stock_refresh_batch_minutes",
+        inverse="_inverse_syscom_stock_refresh_batch_minutes",
+        readonly=False,
+        help="Cada cuántos minutos se procesa un lote. Es el intervalo real del cron "
+             "'Sync Syscom: existencias diarias seleccionados'.",
     )
     syscom_publish_include_children = fields.Boolean(
         string="Publicar categorías con subcategorías",
@@ -81,6 +97,36 @@ class ResConfigSettings(models.TransientModel):
         config_parameter="sync_syscom.publish_include_subcategories",
         help="Si está activo, las acciones de publicar por categoría incluyen automáticamente sus subcategorías.",
     )
+
+    def _cron_refresco_stock(self):
+        return self.env.ref("sync_syscom.cron_sync_syscom_stock_daily",
+                            raise_if_not_found=False)
+
+    @api.depends_context("uid")
+    def _compute_syscom_stock_refresh_batch_minutes(self):
+        """Lee el intervalo del propio cron.
+
+        El campo NO es un `config_parameter`: el intervalo vive en `ir.cron` y ese es el
+        único sitio que manda de verdad. Guardar una copia en un parámetro daría dos
+        fuentes que se desincronizan en cuanto alguien edite el cron a mano.
+        """
+        cron = self._cron_refresco_stock()
+        minutos = DEFAULT_STOCK_REFRESH_BATCH_MINUTES
+        if cron:
+            factor = {"minutes": 1, "hours": 60, "days": 1440,
+                      "weeks": 10080, "months": 43200}.get(cron.sudo().interval_type, 0)
+            minutos = (cron.sudo().interval_number or 0) * factor or DEFAULT_STOCK_REFRESH_BATCH_MINUTES
+        for registro in self:
+            registro.syscom_stock_refresh_batch_minutes = minutos
+
+    def _inverse_syscom_stock_refresh_batch_minutes(self):
+        cron = self._cron_refresco_stock()
+        if not cron:
+            return
+        for registro in self:
+            minutos = max(int(registro.syscom_stock_refresh_batch_minutes or 0),
+                          DEFAULT_STOCK_REFRESH_BATCH_MINUTES_MIN)
+            cron.sudo().write({"interval_number": minutos, "interval_type": "minutes"})
 
     def action_syscom_test_connection(self):
         self.ensure_one()

@@ -31,7 +31,17 @@ DEFAULT_MIN_STOCK = 1                # stock_new mínimo para publicar un produc
 DEFAULT_PRICE_CURRENCY = "usd"       # "usd" convierte con tipo de cambio; "mxn" usa tal cual
 
 # ── Refresco de stock ─────────────────────────────────────────────────────────
-DEFAULT_STOCK_REFRESH_HOURS = 4      # horas mínimas entre ejecuciones del cron de stock
+# El barrido recorre el catálogo entero en lotes y, al terminar la vuelta, descansa.
+# Con 4,364 plantillas a 200 por lote son ~22 lotes: a 15 min, un ciclo dura ~5.6 h.
+#
+# El antiguo DEFAULT_STOCK_REFRESH_HOURS ("Frecuencia de refresco (horas)") se retiró:
+# frenaba entre LOTES, no entre ciclos, así que no podía expresar "un ciclo por semana"
+# --ponerlo en 168 daba un lote por semana, o sea 22 semanas por ciclo--.
+DEFAULT_STOCK_REFRESH_CYCLE_DAYS = 7     # descanso entre vueltas completas al catálogo
+DEFAULT_STOCK_REFRESH_BATCH_MINUTES = 15  # separación entre lotes; gobierna el cron 58
+# Suelo duro: por debajo de esto un lote de 200 no cabe entre corridas y el cron se
+# solaparía consigo mismo contra el rate limit de SYSCOM.
+DEFAULT_STOCK_REFRESH_BATCH_MINUTES_MIN = 5
 
 # ── Logs ──────────────────────────────────────────────────────────────────────
 DEFAULT_LOG_RETENTION_DAYS = 90      # días que se conservan registros en sync.syscom.log
@@ -54,5 +64,19 @@ MAX_RATE_LIMIT_POSTPONES = 5
 # Condiciones para despublicar solo un producto que SYSCOM ya no lista. Se exigen
 # LAS DOS: el contador mide intentos y el numero de intentos depende de que el cron
 # corra a su ritmo; las horas son horas pase lo que pase.
-DEFAULT_RETIRADO_404_MIN_INTENTOS = 3
+#
+# BAJADO A 1 el 21/08/2026 al pasar el refresco a ciclo semanal. Con un ciclo por
+# semana, exigir 3 intentos seguidos serian TRES SEMANAS hasta despublicar un producto
+# retirado.
+#
+# OJO A COMO SE COMBINAN, que es contraintuitivo: con 1 intento y 24 h, y un ciclo
+# semanal, NO se despublica al primer 404. El primer 404 pone la marca de inicio y la
+# condicion de horas todavia no se cumple; la despublicacion llega en el SEGUNDO ciclo,
+# una semana despues. O sea que SI hay una confirmacion, la del ciclo siguiente, y un
+# 404 espurio aislado no llega a despublicar nada.
+#
+# Efecto real: retirada de verdad fuera de la tienda en ~2 semanas; fallo puntual de la
+# API, sin consecuencia. Si alguna vez se quiere despublicar al primer 404, basta con
+# poner tambien retirado_404_min_horas a 0: no hace falta tocar codigo.
+DEFAULT_RETIRADO_404_MIN_INTENTOS = 1
 DEFAULT_RETIRADO_404_MIN_HORAS = 24

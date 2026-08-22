@@ -85,10 +85,17 @@
                                         </div>
                                     </div>
                                     <div class="row mt16" invisible="not syscom_stock_refresh_enabled">
-                                        <label class="col-lg-4 o_light_label" for="syscom_stock_refresh_hours"/>
+                                        <label class="col-lg-4 o_light_label" for="syscom_stock_refresh_batch_minutes"/>
                                         <div class="col-lg-8">
-                                            <field name="syscom_stock_refresh_hours" class="oe_inline"/>
-                                            <span class="text-muted ms-2">Cada cuantas horas como minimo se actualiza el stock.</span>
+                                            <field name="syscom_stock_refresh_batch_minutes" class="oe_inline"/>
+                                            <span class="text-muted ms-2">Cada cuantos minutos se procesa un lote de productos.</span>
+                                        </div>
+                                    </div>
+                                    <div class="row mt16" invisible="not syscom_stock_refresh_enabled">
+                                        <label class="col-lg-4 o_light_label" for="syscom_stock_refresh_cycle_days"/>
+                                        <div class="col-lg-8">
+                                            <field name="syscom_stock_refresh_cycle_days" class="oe_inline"/>
+                                            <span class="text-muted ms-2">Al terminar la vuelta completa al catalogo, espera estos dias antes de empezar la siguiente.</span>
                                         </div>
                                     </div>
                                     <div class="row mt16">

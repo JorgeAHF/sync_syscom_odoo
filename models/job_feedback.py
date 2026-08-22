@@ -179,18 +179,21 @@ def aplazar_por_rate_limit(env, ruta, exc, etiqueta, cron_xmlid=None, con_tope=T
                 cron._trigger(at=cuando)
 
     tiene_cabecera = getattr(exc, "retry_after", None) is not None
+    # Sin tope, poner "de 5" mentia: se vieron mensajes de "aplazamiento 10 de 5" que
+    # parecen un tope rebasado cuando en esa ruta no hay tope ninguno.
+    cuenta = "%s de %s" % (previos + 1, MAX_RATE_LIMIT_POSTPONES) if con_tope \
+        else "%s, sin tope en esta ruta" % (previos + 1)
     env["sync.syscom.log"].sudo().create({
         "name": "Rate limit de SYSCOM (ruta pausada)",
         "kind": "warn",
         "message": (
             "%(etiqueta)s se detuvo por HTTP 429. La ruta queda en pausa %(espera)s s "
-            "(aplazamiento %(n)s de %(max)s). Origen de la espera: %(origen)s. "
+            "(aplazamiento %(n)s). Origen de la espera: %(origen)s. "
             "No se pierde el avance: se retoma donde quedo. Error: %(err)s"
             % {
                 "etiqueta": etiqueta,
                 "espera": espera,
-                "n": previos + 1,
-                "max": MAX_RATE_LIMIT_POSTPONES,
+                "n": cuenta,
                 "origen": "cabecera Retry-After" if tiene_cabecera else "respaldo configurado (SYSCOM no mando Retry-After)",
                 "err": exc,
             }
