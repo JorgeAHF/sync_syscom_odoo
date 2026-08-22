@@ -1,4 +1,4 @@
-from odoo import _, api, fields, models
+from odoo import _, fields, models
 from odoo.exceptions import UserError
 
 from .constants import (
@@ -82,12 +82,15 @@ class ResConfigSettings(models.TransientModel):
     )
     syscom_stock_refresh_batch_minutes = fields.Integer(
         string="Minutos entre lotes",
-        # SIN `default=`: un default gana al compute en `create`/`default_get`, así que
-        # el campo enseñaba siempre 15 aunque el cron estuviera en otro intervalo.
-        # El valor de respaldo, para cuando el cron no exista, lo pone el compute.
-        compute="_compute_syscom_stock_refresh_batch_minutes",
-        inverse="_inverse_syscom_stock_refresh_batch_minutes",
-        readonly=False,
+        # Campo normal, SIN `default=`, `compute=` ni `inverse=`. Se lee en `get_values`
+        # y se escribe en `set_values`, que es el par que usa el botón Guardar.
+        #
+        # Antes llevaba `compute` + `inverse`, y eso lo hacía comportarse distinto del
+        # resto de la página: los `inverse` se disparan al guardarse el REGISTRO, y el
+        # cliente web guarda el registro antes de invocar cualquier botón de tipo objeto.
+        # O sea que pulsar "Probar conexión" con los dos campos cambiados aplicaba los
+        # minutos y NO los días, dejando media configuración puesta. Ahora los dos
+        # esperan al Guardar.
         help="Cada cuántos minutos se procesa un lote. Es el intervalo real del cron "
              "'Sync Syscom: existencias diarias seleccionados'.",
     )
@@ -102,31 +105,41 @@ class ResConfigSettings(models.TransientModel):
         return self.env.ref("sync_syscom.cron_sync_syscom_stock_daily",
                             raise_if_not_found=False)
 
-    @api.depends_context("uid")
-    def _compute_syscom_stock_refresh_batch_minutes(self):
-        """Lee el intervalo del propio cron.
+    def _minutos_entre_lotes_del_cron(self):
+        """El intervalo real del cron 58, en minutos.
 
-        El campo NO es un `config_parameter`: el intervalo vive en `ir.cron` y ese es el
-        único sitio que manda de verdad. Guardar una copia en un parámetro daría dos
-        fuentes que se desincronizan en cuanto alguien edite el cron a mano.
+        El intervalo vive en `ir.cron` y ese es el único sitio que manda de verdad.
+        Guardar una copia en un `ir.config_parameter` daría dos fuentes que se
+        desincronizan en cuanto alguien edite el cron a mano.
         """
         cron = self._cron_refresco_stock()
-        minutos = DEFAULT_STOCK_REFRESH_BATCH_MINUTES
-        if cron:
-            factor = {"minutes": 1, "hours": 60, "days": 1440,
-                      "weeks": 10080, "months": 43200}.get(cron.sudo().interval_type, 0)
-            minutos = (cron.sudo().interval_number or 0) * factor or DEFAULT_STOCK_REFRESH_BATCH_MINUTES
-        for registro in self:
-            registro.syscom_stock_refresh_batch_minutes = minutos
+        if not cron:
+            return DEFAULT_STOCK_REFRESH_BATCH_MINUTES
+        cron = cron.sudo()
+        factor = {"minutes": 1, "hours": 60, "days": 1440,
+                  "weeks": 10080, "months": 43200}.get(cron.interval_type, 0)
+        return ((cron.interval_number or 0) * factor
+                or DEFAULT_STOCK_REFRESH_BATCH_MINUTES)
 
-    def _inverse_syscom_stock_refresh_batch_minutes(self):
+    def get_values(self):
+        valores = super().get_values()
+        valores["syscom_stock_refresh_batch_minutes"] = self._minutos_entre_lotes_del_cron()
+        return valores
+
+    def set_values(self):
+        super().set_values()
         cron = self._cron_refresco_stock()
         if not cron:
             return
-        for registro in self:
-            minutos = max(int(registro.syscom_stock_refresh_batch_minutes or 0),
-                          DEFAULT_STOCK_REFRESH_BATCH_MINUTES_MIN)
-            cron.sudo().write({"interval_number": minutos, "interval_type": "minutes"})
+        # Suelo duro: por debajo de esto un lote de 200 no cabe entre corridas y el cron
+        # se solaparía consigo mismo contra el rate limit de SYSCOM.
+        minutos = max(int(self.syscom_stock_refresh_batch_minutes or 0),
+                      DEFAULT_STOCK_REFRESH_BATCH_MINUTES_MIN)
+        cron = cron.sudo()
+        # Solo se escribe si cambia: si no, cada Guardar de Ajustes movería el
+        # `write_date` del cron sin motivo.
+        if (cron.interval_number, cron.interval_type) != (minutos, "minutes"):
+            cron.write({"interval_number": minutos, "interval_type": "minutes"})
 
     def action_syscom_test_connection(self):
         self.ensure_one()
