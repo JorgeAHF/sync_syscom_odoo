@@ -34,7 +34,6 @@ records.write({"selected": True})
         <record id="server_action_publish_categories_with_children" model="ir.actions.server">
             <field name="name">Publicar lo seleccionado (incluye subcategorías)</field>
             <field name="model_id" ref="model_sync_syscom_category"/>
-            <field name="binding_model_id" ref="model_sync_syscom_category"/>
             <field name="binding_type">action</field>
             <field name="state">code</field>
             <field name="code">
