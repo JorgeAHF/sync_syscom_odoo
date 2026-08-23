@@ -62,6 +62,7 @@ action = env["sync.syscom.brand"].action_publish_marked_brands()
                             name="%(server_action_sync_syscom_models_selected)d"
                             type="action"
                             string="Traer productos de las marcas seleccionadas"
+                            title="Descarga el catálogo de las marcas seleccionadas en esta lista al catálogo local. Respeta tu selección."
                             class="btn-secondary"
                             groups="sync_syscom.group_sync_syscom_manager"
                         />
@@ -69,6 +70,7 @@ action = env["sync.syscom.brand"].action_publish_marked_brands()
                             name="%(server_action_sync_syscom_brand)d"
                             type="action"
                             string="Actualizar lista de marcas"
+                            title="Sincronización masiva de las 800+ marcas de SYSCOM. Tarda varias horas. No requiere selección: ignora lo marcado en la lista."
                             class="btn-primary"
                             groups="sync_syscom.group_sync_syscom_manager"
                         />
@@ -76,6 +78,7 @@ action = env["sync.syscom.brand"].action_publish_marked_brands()
                             name="%(server_action_publish_scope_brands)d"
                             type="action"
                             string="Publicar productos de las marcas seleccionadas"
+                            title="Encola para publicar los productos de las marcas seleccionadas en esta lista. Respeta tu selección; se procesa en segundo plano."
                             class="btn-primary"
                             groups="sync_syscom.group_sync_syscom_manager"
                         />
@@ -98,8 +101,8 @@ action = env["sync.syscom.brand"].action_publish_marked_brands()
             <field name="arch" type="xml">
                 <form string="Marca SYSCOM">
                     <header>
-                        <button name="action_sync_all_models" type="object" string="Traer todos los productos de esta marca" class="btn-secondary" groups="sync_syscom.group_sync_syscom_manager"/>
-                        <button name="%(server_action_publish_scope_brands)d" type="action" string="Publicar productos de esta marca" class="btn-primary" groups="sync_syscom.group_sync_syscom_manager"/>
+                        <button name="action_sync_all_models" type="object" string="Traer todos los productos de esta marca" title="Descarga el catálogo de esta marca desde SYSCOM al catálogo local. Aún no publica nada en la tienda." class="btn-secondary" groups="sync_syscom.group_sync_syscom_manager"/>
+                        <button name="%(server_action_publish_scope_brands)d" type="action" string="Publicar productos de esta marca" title="Encola los productos ya descargados de esta marca para que se publiquen. Se procesa en segundo plano; consulta el avance en Trabajos publicación." class="btn-primary" groups="sync_syscom.group_sync_syscom_manager"/>
                     </header>
                     <sheet>
                         <group string="Identidad" colspan="2">
