@@ -395,14 +395,27 @@ class SyscomBrand(models.Model):
         updated_products = 0
         fetched_products = 0
         errors = 0
+        avanzadas = 0
+        rate_limit = None
 
         for brand in slice_brands:
+            avanzadas += 1
             try:
                 result = self._sync_brand_products_for_brand(client, brand, params)
                 processed += 1
                 created_products += result["created"]
                 updated_products += result["updated"]
                 fetched_products += result["fetched"]
+            except SyscomRateLimitError as exc:
+                # Un 429 no es "esta marca falló", es la API entera diciendo que pare.
+                # Antes caía en el `except Exception` de abajo y se contaba como error
+                # de esta marca, así que el bucle seguía a la siguiente y podía encajar
+                # hasta `chunk_limit` respuestas 429 seguidas en un solo lote sin pausar
+                # nada. Igual que en `_sync_brands_batch`: se propaga para que
+                # `cron_process_sync_jobs` pause la ruta entera.
+                avanzadas -= 1
+                rate_limit = exc
+                break
             except Exception as exc:
                 errors += 1
                 self.env["sync.syscom.log"].sudo().create({
@@ -411,20 +424,24 @@ class SyscomBrand(models.Model):
                     "message": _("Error sincronizando marca: %s") % exc,
                 })
 
-        next_offset = offset + len(slice_brands)
-        finished = next_offset >= total
+        # Con rate limit el offset avanza solo lo realmente consumido, para que el
+        # siguiente intento retome en la marca que se quedó sin respuesta.
+        consumidas = avanzadas if rate_limit else len(slice_brands)
+        next_offset = offset + consumidas
+        finished = not rate_limit and next_offset >= total
         if finished:
             next_offset = 0
 
         return {
             "total": total,
-            "processed": len(slice_brands),
+            "processed": consumidas,
             "created_products": created_products,
             "updated_products": updated_products,
             "fetched_products": fetched_products,
             "errors": errors,
             "next_offset": next_offset,
             "finished": finished,
+            "rate_limit": rate_limit,
         }
 
     def action_sync_all_brands_batch(self):
