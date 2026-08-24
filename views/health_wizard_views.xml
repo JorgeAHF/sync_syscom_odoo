@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+        <record id="view_sync_syscom_health_wizard_form" model="ir.ui.view">
+            <field name="name">sync.syscom.health.wizard.form</field>
+            <field name="model">sync.syscom.health.wizard</field>
+            <field name="arch" type="xml">
+                <form string="Salud de sincronización SYSCOM">
+                    <header>
+                        <button
+                            name="action_refresh"
+                            type="object"
+                            string="Actualizar"
+                            title="Vuelve a leer crons, trabajos, abandonados y pausas por rate limit en este momento, sin cerrar la pantalla."
+                            class="btn-primary"
+                            groups="sync_syscom.group_sync_syscom_manager"
+                        />
+                    </header>
+                    <sheet>
+                        <group>
+                            <field name="computed_at" readonly="1" string="Calculado el"/>
+                        </group>
+                        <notebook>
+                            <page string="Crons">
+                                <field name="cron_line_ids" readonly="1">
+                                    <list decoration-danger="estado == 'vencido'" decoration-muted="estado == 'inactivo'">
+                                        <field name="cron_id"/>
+                                        <field name="cron_active" string="Activo"/>
+                                        <field name="intervalo"/>
+                                        <field name="nextcall"/>
+                                        <field name="lastcall"/>
+                                        <field name="retraso_minutos"/>
+                                        <field name="estado"/>
+                                        <button
+                                            name="action_open_cron"
+                                            type="object"
+                                            string="Abrir"
+                                            title="Abre la ficha de este cron."
+                                            class="btn-link"
+                                        />
+                                    </list>
+                                </field>
+                            </page>
+                            <page string="Trabajos">
+                                <field name="job_line_ids" readonly="1">
+                                    <list decoration-warning="state == 'error'">
+                                        <field name="modelo_label" string="Trabajo"/>
+                                        <field name="job_type" string="Tipo"/>
+                                        <field name="state" string="Estado"/>
+                                        <field name="cantidad"/>
+                                        <button
+                                            name="action_open_records"
+                                            type="object"
+                                            string="Abrir"
+                                            title="Abre la lista filtrada por este tipo y estado."
+                                            class="btn-link"
+                                        />
+                                    </list>
+                                </field>
+                            </page>
+                            <page string="Abandonados">
+                                <field name="abandoned_line_ids" readonly="1">
+                                    <list>
+                                        <field name="motivo"/>
+                                        <field name="cantidad"/>
+                                        <button
+                                            name="action_open_records"
+                                            type="object"
+                                            string="Abrir"
+                                            title="Abre Modelos SYSCOM filtrado por este motivo de abandono."
+                                            class="btn-link"
+                                        />
+                                    </list>
+                                </field>
+                            </page>
+                            <page string="Pausas por rate limit">
+                                <field name="rate_limit_line_ids" readonly="1">
+                                    <list decoration-danger="pausado == True">
+                                        <field name="ruta_label" string="Ruta"/>
+                                        <field name="pausado"/>
+                                        <field name="pausa_hasta"/>
+                                        <field name="aplazamientos"/>
+                                    </list>
+                                </field>
+                            </page>
+                        </notebook>
+                    </sheet>
+                </form>
+            </field>
+        </record>
+
+        <record id="action_sync_syscom_health_wizard" model="ir.actions.act_window">
+            <field name="name">Salud de sincronización</field>
+            <field name="res_model">sync.syscom.health.wizard</field>
+            <field name="view_mode">form</field>
+            <field name="target">current</field>
+        </record>
+    </data>
+</odoo>

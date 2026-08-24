@@ -22,6 +22,7 @@
         "views/dropship_job_views.xml",
         "views/product_data_job_views.xml",
         "views/sync_log_views.xml",
+        "views/health_wizard_views.xml",
         "views/menu.xml",
         "views/website_sale_product_stock.xml",
         "views/product_template_views.xml",

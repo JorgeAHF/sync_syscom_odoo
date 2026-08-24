@@ -8,3 +8,9 @@ access_sync_syscom_cost_job_manager,access.sync.syscom.cost.job.manager,model_sy
 access_sync_syscom_dropship_job_manager,access.sync.syscom.dropship.job.manager,model_sync_syscom_dropship_job,sync_syscom.group_sync_syscom_manager,1,1,1,1
 access_sync_syscom_product_data_job_manager,access.sync.syscom.product.data.job.manager,model_sync_syscom_product_data_job,sync_syscom.group_sync_syscom_manager,1,1,1,1
 access_sync_syscom_product_manager,access.sync.syscom.product.manager,model_sync_syscom_product,sync_syscom.group_sync_syscom_manager,1,1,1,1
+access_sync_syscom_health_wizard_manager,access.sync.syscom.health.wizard.manager,model_sync_syscom_health_wizard,sync_syscom.group_sync_syscom_manager,1,1,1,1
+access_sync_syscom_health_cron_line_manager,access.sync.syscom.health.cron.line.manager,model_sync_syscom_health_cron_line,sync_syscom.group_sync_syscom_manager,1,1,1,1
+access_sync_syscom_health_job_line_manager,access.sync.syscom.health.job.line.manager,model_sync_syscom_health_job_line,sync_syscom.group_sync_syscom_manager,1,1,1,1
+access_sync_syscom_health_abandoned_line_manager,access.sync.syscom.health.abandoned.line.manager,model_sync_syscom_health_abandoned_line,sync_syscom.group_sync_syscom_manager,1,1,1,1
+access_sync_syscom_health_rate_limit_line_manager,access.sync.syscom.health.rate.limit.line.manager,model_sync_syscom_health_rate_limit_line,sync_syscom.group_sync_syscom_manager,1,1,1,1
+access_ir_cron_sync_syscom_manager_read,access.ir.cron.sync.syscom.manager.read,base.model_ir_cron,sync_syscom.group_sync_syscom_manager,1,0,0,0
