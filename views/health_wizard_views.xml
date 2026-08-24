@@ -63,11 +63,32 @@
                                     <list>
                                         <field name="motivo"/>
                                         <field name="cantidad"/>
+                                        <field name="bucket_key" column_invisible="1"/>
                                         <button
                                             name="action_open_records"
                                             type="object"
                                             string="Abrir"
                                             title="Abre Modelos SYSCOM filtrado por este motivo de abandono."
+                                            class="btn-link"
+                                        />
+                                        <button
+                                            name="action_retry_records"
+                                            type="object"
+                                            string="Reintentar"
+                                            title="Vuelve a poner en cola de publicación a todos los de este motivo, sin pasar por selección."
+                                            invisible="bucket_key != 'stock_insuficiente'"
+                                            confirm="REGLA DURA 1 — consumo real de cuota SYSCOM. Reintenta publicar los productos abandonados por falta de stock: se procesa en lotes durante varias horas, sin bloquear nada mientras tanto, y muchos pueden volver a fallar si el stock sigue igual."
+                                            confirm-label="Confirmo que tengo autorización para esta sincronización masiva"
+                                            class="btn-link"
+                                        />
+                                        <button
+                                            name="action_retry_records"
+                                            type="object"
+                                            string="Reintentar"
+                                            title="Vuelve a poner en cola de publicación a todos los de este motivo, sin pasar por selección."
+                                            invisible="bucket_key not in ('http_429', 'sin_motivo')"
+                                            confirm="Reintenta publicar los productos de este motivo: vuelven a la cola y se procesan en lotes, sin bloquear nada mientras tanto."
+                                            confirm-label="Continuar"
                                             class="btn-link"
                                         />
                                     </list>

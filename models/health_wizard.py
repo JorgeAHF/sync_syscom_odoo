@@ -58,6 +58,15 @@ _BUCKETS_ABANDONO = [
     ("sin_motivo", "Sin motivo registrado",
      [("sync_error", "in", [False, ""])]),
 ]
+# De estos cuatro, solo tres llevan botón "Reintentar" en la vista -ver la condición
+# `invisible` de cada botón en health_wizard_views.xml, que es la única fuente real de
+# esa lista, no repetida aquí como constante para no tener dos sitios que desalinear-.
+# HTTP 404 queda fuera a propósito: el propio `_es_error_definitivo` (syscom_product.py)
+# documenta que un 404 significa que SYSCOM ya no tiene el producto, y por eso `64c609b`
+# dejó de gastarle los tres reintentos. Reintentar en masa justo ahí contradice esa
+# decisión. "Otro" también queda fuera: es la bolsa de motivos sin patrón conocido,
+# reintentarla a ciegas no tiene la misma base que las tres que sí tienen una causa
+# identificada.
 _DOMAIN_OTRO_ABANDONO = [
     ("sync_error", "not like", "Stock insuficiente%"),
     ("sync_error", "not like", "HTTP 404%"),
@@ -422,6 +431,37 @@ class SyncSyscomHealthAbandonedLine(models.TransientModel):
     motivo = fields.Char(string="Motivo")
     bucket_key = fields.Char(string="Clave interna")
     cantidad = fields.Integer(string="Cantidad")
+
+    def action_retry_records(self):
+        """Reset en bloque, mismos cuatro campos que ya limpia el reintento manual de
+        un producto (`action_reset_publish_state`) -no se inventa una semántica nueva,
+        se aplica en masa la que ya existe-. No verifica stock antes: ninguno de estos
+        productos tiene product.template -nunca llegaron a publicarse-, así que no hay
+        dato local fiable que consultar sin salir a la API, y salir a la API para
+        decidir si vale la pena reintentar costaría lo mismo que el propio reintento.
+        El cron de publicación hace esa comprobación por su cuenta, a su ritmo ya
+        establecido, cuando le toque el turno a cada producto.
+        """
+        self.ensure_one()
+        Product = self.env[self.res_model].sudo()
+        productos = Product.search(ast.literal_eval(self.domain))
+        productos.write({
+            "publish_state": "pending",
+            "publish_retry_count": 0,
+            "sync_error": False,
+            "publish_enqueued_at": fields.Datetime.now(),
+        })
+        self.env["sync.syscom.log"].sudo().create({
+            "name": "Reintento masivo desde Salud de sincronización",
+            "kind": "info",
+            "message": "Motivo: %s. %s productos vuelven a la cola de publicación "
+                       "(contador y error reiniciados)." % (self.motivo, len(productos)),
+        })
+        # El propio wizard vuelve a leer sus 5 tablas: esta fila baja a 0 -ya no
+        # cumplen publish_state='abandoned'-, que es la evidencia de que el clic
+        # surtió efecto, sin esperar a que el cron termine horas después.
+        self.wizard_id._refresh_lines()
+        return True
 
 
 class SyncSyscomHealthPublishGapLine(models.TransientModel):
