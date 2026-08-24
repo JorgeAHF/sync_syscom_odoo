@@ -65,6 +65,28 @@ _DOMAIN_OTRO_ABANDONO = [
     ("sync_error", "not in", [False, ""]),
 ]
 
+# (clave, etiqueta) de los motivos de "publish_state=done pero is_published=False"
+# -el proceso terminó sin fallo, pero el producto no se ve en la tienda-. Medido el
+# 24/08/2026 contra el catálogo real: 765 casos de 4,368 en 'done' (17.5%), repartidos
+# en los tres primeros, con el cuarto en 0 -pero comprobado en la propia consulta, no
+# asumido: ver el motivo en _build_publish_gap_lines.
+#
+# OJO, "stock_con_mensaje" usa un texto DISTINTO al de _BUCKETS_ABANDONO: "Sin stock
+# suficiente" (este) es el mensaje que escribe la ruta de publicación cuando decide no
+# publicar; "Stock insuficiente en SYSCOM" (el de abandono) es el que escribe el
+# abandono por reintentos agotados. Se parecen y no son el mismo mensaje -confundirlos
+# rompe el filtro en silencio, ya pasó una vez al escribir esta consulta.
+_BUCKET_RETIRADO = "retirado"
+_BUCKET_STOCK_CON_MENSAJE = "stock_con_mensaje"
+_BUCKET_STOCK_SIN_MENSAJE = "stock_sin_mensaje"
+_BUCKET_SIN_EXPLICACION = "sin_explicacion"
+_BUCKETS_PUBLISH_GAP = [
+    (_BUCKET_RETIRADO, "Retirado de SYSCOM (HTTP 404) — auto-despublicado"),
+    (_BUCKET_STOCK_CON_MENSAJE, "Stock insuficiente (con mensaje registrado)"),
+    (_BUCKET_STOCK_SIN_MENSAJE, "Stock insuficiente (confirmado ahora, sin mensaje)"),
+    (_BUCKET_SIN_EXPLICACION, "Sin explicación (ni retirado, ni stock bajo, ni mensaje)"),
+]
+
 
 class SyncSyscomHealthOpenableLine(models.AbstractModel):
     """Mixin para líneas que abren, con un botón, la lista real que cuentan.
@@ -78,10 +100,16 @@ class SyncSyscomHealthOpenableLine(models.AbstractModel):
 
     res_model = fields.Char(string="Modelo", required=True)
     domain = fields.Char(string="Dominio", required=True)
+    # Vacío -> la lista por defecto de `res_model`. Se necesita explícito cuando esa
+    # lista por defecto no muestra el dato que justifica la fila: p. ej. la lista de
+    # product.template de serie no trae columnas SYSCOM, así que la fila "stock
+    # insuficiente sin mensaje" sería un callejón sin salida -se abre, y ahí tampoco
+    # se ve por qué- sin una vista propia que sí muestre el stock.
+    list_view_xmlid = fields.Char(string="Vista de lista")
 
     def action_open_records(self):
         self.ensure_one()
-        return {
+        action = {
             "type": "ir.actions.act_window",
             "name": self.display_name,
             "res_model": self.res_model,
@@ -89,6 +117,11 @@ class SyncSyscomHealthOpenableLine(models.AbstractModel):
             "domain": ast.literal_eval(self.domain),
             "target": "current",
         }
+        if self.list_view_xmlid:
+            vista = self.env.ref(self.list_view_xmlid, raise_if_not_found=False)
+            if vista:
+                action["views"] = [(vista.id, "list"), (False, "form")]
+        return action
 
 
 class SyncSyscomHealthWizard(models.TransientModel):
@@ -102,6 +135,9 @@ class SyncSyscomHealthWizard(models.TransientModel):
         "sync.syscom.health.job.line", "wizard_id", string="Trabajos", readonly=True)
     abandoned_line_ids = fields.One2many(
         "sync.syscom.health.abandoned.line", "wizard_id", string="Abandonados", readonly=True)
+    publish_gap_line_ids = fields.One2many(
+        "sync.syscom.health.publish.gap.line", "wizard_id",
+        string="Terminados sin publicar", readonly=True)
     rate_limit_line_ids = fields.One2many(
         "sync.syscom.health.rate.limit.line", "wizard_id", string="Pausas por rate limit",
         readonly=True)
@@ -124,6 +160,9 @@ class SyncSyscomHealthWizard(models.TransientModel):
             res["job_line_ids"] = [(0, 0, vals) for vals in self._build_job_lines()]
         if "abandoned_line_ids" in fields_list:
             res["abandoned_line_ids"] = [(0, 0, vals) for vals in self._build_abandoned_lines()]
+        if "publish_gap_line_ids" in fields_list:
+            res["publish_gap_line_ids"] = [
+                (0, 0, vals) for vals in self._build_publish_gap_lines()]
         if "rate_limit_line_ids" in fields_list:
             res["rate_limit_line_ids"] = [(0, 0, vals) for vals in self._build_rate_limit_lines()]
         if "computed_at" in fields_list:
@@ -145,15 +184,19 @@ class SyncSyscomHealthWizard(models.TransientModel):
             wizard.cron_line_ids.unlink()
             wizard.job_line_ids.unlink()
             wizard.abandoned_line_ids.unlink()
+            wizard.publish_gap_line_ids.unlink()
             wizard.rate_limit_line_ids.unlink()
             Cron = self.env["sync.syscom.health.cron.line"]
             Job = self.env["sync.syscom.health.job.line"]
             Abandoned = self.env["sync.syscom.health.abandoned.line"]
+            PublishGap = self.env["sync.syscom.health.publish.gap.line"]
             RateLimit = self.env["sync.syscom.health.rate.limit.line"]
             Cron.create([dict(vals, wizard_id=wizard.id) for vals in wizard._build_cron_lines()])
             Job.create([dict(vals, wizard_id=wizard.id) for vals in wizard._build_job_lines()])
             Abandoned.create(
                 [dict(vals, wizard_id=wizard.id) for vals in wizard._build_abandoned_lines()])
+            PublishGap.create(
+                [dict(vals, wizard_id=wizard.id) for vals in wizard._build_publish_gap_lines()])
             RateLimit.create(
                 [dict(vals, wizard_id=wizard.id) for vals in wizard._build_rate_limit_lines()])
             wizard.computed_at = fields.Datetime.now()
@@ -244,6 +287,66 @@ class SyncSyscomHealthWizard(models.TransientModel):
         })
         return vals_list
 
+    def _build_publish_gap_lines(self):
+        """publish_state='done' pero is_published=False: el proceso dice terminado,
+        el cliente no lo ve. Sin relación formal (Many2one) entre los dos modelos
+        -se emparejan por valor, syscom_id contra syscom_product_id-, así que no hay
+        dominio de Odoo que lo exprese directo; se resuelve con una sola consulta SQL
+        que ya trae los ids de product.template agrupados por motivo, no fila por
+        fila. Medido con EXPLAIN ANALYZE el 24/08/2026: ~56 ms sobre 41,734 filas de
+        staging y 4,369 plantillas SYSCOM.
+
+        El tercer bucket compara el stock actual contra el mínimo de verdad -no es un
+        cajón de sastre "todo lo que sobra"-, con la misma fórmula que usa el refresco
+        de stock para decidir si republica: stock SYSCOM alcanza el mínimo, O hay
+        stock propio de HERGON que blinda al producto (`syscom_product.py:1463`). Lo
+        que no encaja en ningún bucket anterior cae en "sin explicación", no se
+        confunde con "stock insuficiente": hoy da 0, pero un producto despublicado a
+        mano con stock sano -la corrección manual es el mecanismo normal de esta
+        tienda, no una excepción- caería ahí, marcado como lo que es, no disfrazado
+        de problema de stock que no tiene.
+        """
+        min_stock = int(
+            self.env["ir.config_parameter"].sudo().get_param("sync_syscom.min_stock") or 1)
+        self.env.cr.execute("""
+            SELECT
+              CASE
+                WHEN pt.syscom_sync_error LIKE %(retirado)s THEN %(bucket_retirado)s
+                WHEN sp.sync_error LIKE %(con_mensaje)s THEN %(bucket_con_mensaje)s
+                WHEN pt.syscom_stock_new < %(min_stock)s
+                     AND coalesce(pt.syscom_stock_propio, 0) = 0 THEN %(bucket_sin_mensaje)s
+                ELSE %(bucket_sin_explicacion)s
+              END AS bucket,
+              array_agg(pt.id) AS ids
+            FROM sync_syscom_product sp
+            JOIN product_template pt ON pt.syscom_product_id = sp.syscom_id
+            WHERE sp.publish_state = 'done' AND pt.is_published = false
+            GROUP BY 1
+        """, {
+            "retirado": "HTTP 404%",
+            "con_mensaje": "Sin stock suficiente%",
+            "min_stock": min_stock,
+            "bucket_retirado": _BUCKET_RETIRADO,
+            "bucket_con_mensaje": _BUCKET_STOCK_CON_MENSAJE,
+            "bucket_sin_mensaje": _BUCKET_STOCK_SIN_MENSAJE,
+            "bucket_sin_explicacion": _BUCKET_SIN_EXPLICACION,
+        })
+        ids_por_bucket = dict(self.env.cr.fetchall())
+
+        vals_list = []
+        for clave, etiqueta in _BUCKETS_PUBLISH_GAP:
+            ids = ids_por_bucket.get(clave) or []
+            domain = [("id", "in", ids)]
+            vals_list.append({
+                "res_model": "product.template",
+                "list_view_xmlid": "sync_syscom.view_product_template_health_list",
+                "motivo": etiqueta,
+                "bucket_key": clave,
+                "cantidad": len(ids),
+                "domain": repr(domain),
+            })
+        return vals_list
+
     def _build_rate_limit_lines(self):
         params = self.env["ir.config_parameter"].sudo()
         vals_list = []
@@ -313,6 +416,18 @@ class SyncSyscomHealthAbandonedLine(models.TransientModel):
     _name = "sync.syscom.health.abandoned.line"
     _inherit = ["sync.syscom.health.openable.line"]
     _description = "Salud de sincronización — línea de abandonados"
+    _order = "cantidad desc"
+
+    wizard_id = fields.Many2one("sync.syscom.health.wizard", required=True, ondelete="cascade")
+    motivo = fields.Char(string="Motivo")
+    bucket_key = fields.Char(string="Clave interna")
+    cantidad = fields.Integer(string="Cantidad")
+
+
+class SyncSyscomHealthPublishGapLine(models.TransientModel):
+    _name = "sync.syscom.health.publish.gap.line"
+    _inherit = ["sync.syscom.health.openable.line"]
+    _description = "Salud de sincronización — línea de terminados sin publicar"
     _order = "cantidad desc"
 
     wizard_id = fields.Many2one("sync.syscom.health.wizard", required=True, ondelete="cascade")
