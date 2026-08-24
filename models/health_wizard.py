@@ -106,6 +106,30 @@ class SyncSyscomHealthWizard(models.TransientModel):
         "sync.syscom.health.rate.limit.line", "wizard_id", string="Pausas por rate limit",
         readonly=True)
 
+    @api.model
+    def default_get(self, fields_list):
+        """Puebla las 4 tablas ya en el `default_get`, no solo en `create`.
+
+        Abrir la acción desde el menú renderiza un registro "Nuevo" (NewId) en el
+        cliente, que se arma con `default_get` y **no** pasa por `create` hasta que
+        algo fuerza un guardado -por eso "Actualizar" parecía ser el único botón que
+        poblaba algo: es un botón de tipo objeto, y esos fuerzan el guardado antes de
+        llamar al método-. Sin este override, abrir el panel mostraba las 4 tablas
+        vacías hasta el primer clic.
+        """
+        res = super().default_get(fields_list)
+        if "cron_line_ids" in fields_list:
+            res["cron_line_ids"] = [(0, 0, vals) for vals in self._build_cron_lines()]
+        if "job_line_ids" in fields_list:
+            res["job_line_ids"] = [(0, 0, vals) for vals in self._build_job_lines()]
+        if "abandoned_line_ids" in fields_list:
+            res["abandoned_line_ids"] = [(0, 0, vals) for vals in self._build_abandoned_lines()]
+        if "rate_limit_line_ids" in fields_list:
+            res["rate_limit_line_ids"] = [(0, 0, vals) for vals in self._build_rate_limit_lines()]
+        if "computed_at" in fields_list:
+            res["computed_at"] = fields.Datetime.now()
+        return res
+
     @api.model_create_multi
     def create(self, vals_list):
         records = super().create(vals_list)
@@ -126,10 +150,12 @@ class SyncSyscomHealthWizard(models.TransientModel):
             Job = self.env["sync.syscom.health.job.line"]
             Abandoned = self.env["sync.syscom.health.abandoned.line"]
             RateLimit = self.env["sync.syscom.health.rate.limit.line"]
-            Cron.create(wizard._build_cron_lines())
-            Job.create(wizard._build_job_lines())
-            Abandoned.create(wizard._build_abandoned_lines())
-            RateLimit.create(wizard._build_rate_limit_lines())
+            Cron.create([dict(vals, wizard_id=wizard.id) for vals in wizard._build_cron_lines()])
+            Job.create([dict(vals, wizard_id=wizard.id) for vals in wizard._build_job_lines()])
+            Abandoned.create(
+                [dict(vals, wizard_id=wizard.id) for vals in wizard._build_abandoned_lines()])
+            RateLimit.create(
+                [dict(vals, wizard_id=wizard.id) for vals in wizard._build_rate_limit_lines()])
             wizard.computed_at = fields.Datetime.now()
 
     def _crons_del_modulo(self):
@@ -159,7 +185,6 @@ class SyncSyscomHealthWizard(models.TransientModel):
                             estado = "vencido"
 
             vals_list.append({
-                "wizard_id": self.id,
                 "cron_id": cron.id,
                 "cron_active": cron.active,
                 "intervalo": "%s %s" % (cron.interval_number, cron.interval_type),
@@ -187,7 +212,6 @@ class SyncSyscomHealthWizard(models.TransientModel):
                 if job_type:
                     domain.append(("job_type", "=", job_type))
                 vals_list.append({
-                    "wizard_id": self.id,
                     "res_model": modelo,
                     "modelo_label": etiqueta,
                     "job_type": job_type,
@@ -204,7 +228,6 @@ class SyncSyscomHealthWizard(models.TransientModel):
         for clave, etiqueta, extra in _BUCKETS_ABANDONO:
             domain = base + extra
             vals_list.append({
-                "wizard_id": self.id,
                 "res_model": "sync.syscom.product",
                 "motivo": etiqueta,
                 "bucket_key": clave,
@@ -213,7 +236,6 @@ class SyncSyscomHealthWizard(models.TransientModel):
             })
         domain_otro = base + _DOMAIN_OTRO_ABANDONO
         vals_list.append({
-            "wizard_id": self.id,
             "res_model": "sync.syscom.product",
             "motivo": _("Otro"),
             "bucket_key": "otro",
@@ -230,7 +252,6 @@ class SyncSyscomHealthWizard(models.TransientModel):
             pausa_hasta_raw = params.get_param(_clave_pausa(ruta))
             pausa_hasta = fields.Datetime.to_datetime(pausa_hasta_raw) if pausa_hasta_raw else False
             vals_list.append({
-                "wizard_id": self.id,
                 "ruta": ruta,
                 "ruta_label": etiqueta,
                 "pausado": restantes > 0,
