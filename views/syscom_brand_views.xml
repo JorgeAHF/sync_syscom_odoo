@@ -71,6 +71,8 @@ action = env["sync.syscom.brand"].action_publish_marked_brands()
                             type="action"
                             string="Actualizar lista de marcas"
                             title="Sincronización masiva de las 800+ marcas de SYSCOM. Tarda varias horas. No requiere selección: ignora lo marcado en la lista."
+                            confirm="REGLA DURA 1 — consumo real de cuota SYSCOM. Sincronización masiva de las 800+ marcas de SYSCOM. Sale a la API real, compartida con producción, y puede tardar varias horas. No requiere selección: se ignora lo marcado en la lista."
+                            confirm-label="Confirmo que tengo autorización para esta sincronización masiva"
                             class="btn-primary"
                             groups="sync_syscom.group_sync_syscom_manager"
                         />

@@ -87,6 +87,8 @@
                             type="action"
                             string="Traer modelos nuevos de SYSCOM"
                             title="Trae los modelos nuevos del catálogo completo de SYSCOM. No respeta tu selección: aplica a todas las marcas."
+                            confirm="Trae los modelos nuevos del catálogo completo de SYSCOM. Esto afecta TODO el catálogo, no tu selección."
+                            confirm-label="Continuar"
                             class="btn-primary"
                             groups="sync_syscom.group_sync_syscom_manager"
                         />
@@ -95,6 +97,8 @@
                             type="action"
                             string="Recalcular costos SYSCOM"
                             title="Recalcula el costo de todo el catálogo ya sincronizado (no vuelve a consultar a SYSCOM). No respeta tu selección."
+                            confirm="Recalcula el costo de todo el catálogo ya sincronizado. Esto afecta TODO el catálogo, no tu selección."
+                            confirm-label="Continuar"
                             class="btn-secondary"
                             groups="sync_syscom.group_sync_syscom_manager"
                         />
@@ -103,6 +107,8 @@
                             type="action"
                             string="Configurar dropshipping"
                             title="Ajusta la configuración de proveedor sobre todo el catálogo ya sincronizado. No respeta tu selección."
+                            confirm="Ajusta la configuración de proveedor sobre todo el catálogo ya sincronizado. Esto afecta TODO el catálogo, no tu selección."
+                            confirm-label="Continuar"
                             class="btn-secondary"
                             groups="sync_syscom.group_sync_syscom_manager"
                         />
@@ -111,6 +117,8 @@
                             type="action"
                             string="Actualizar datos extendidos"
                             title="Sincronización masiva: consulta a SYSCOM todo el catálogo, uno por uno. No respeta tu selección. Requiere autorización antes de usarse."
+                            confirm="REGLA DURA 1 — consumo real de cuota SYSCOM. Sincronización masiva: consulta a SYSCOM todo el catálogo, uno por uno —miles de llamadas reales, compartidas con producción—. No respeta tu selección."
+                            confirm-label="Confirmo que tengo autorización para esta sincronización masiva"
                             class="btn-secondary"
                             groups="sync_syscom.group_sync_syscom_manager"
                         />
