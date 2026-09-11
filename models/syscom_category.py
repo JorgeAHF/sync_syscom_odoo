@@ -119,7 +119,15 @@ class SyscomCategory(models.Model):
             cat_ids = Category.search([("id", "child_of", record.id)]).ids
             brands = Brand.browse([])
             if cat_ids:
-                brands = Brand.search([("category_ids.id", "in", cat_ids)])
+                # Vínculo declarado por SYSCOM en /marcas/{id}. Puede faltar aunque
+                # la categoría ya tenga modelos: medido el 11/09/2026, el 82% de las
+                # categorías con al menos un modelo no tenían ninguna marca aquí.
+                declaradas = Brand.search([("category_ids.id", "in", cat_ids)])
+                # Se completa con la marca de cada modelo ya vinculado a estas
+                # categorías -- el mismo dato que alimenta `model_count`, así que
+                # nunca puede haber modelos sin marca mostrada.
+                derivadas = Category.browse(cat_ids).product_ids.mapped("brand_id")
+                brands = declaradas | derivadas
             record.brand_ids_tree = brands
 
     def _compute_model_count(self):
@@ -478,10 +486,19 @@ class SyscomCategory(models.Model):
         salía a la API, y cambiarlo en el mismo movimiento mezclaría dos cosas.  La
         columna «Marcas heredadas» de la lista sí incluye el subárbol
         (``brand_ids_tree``), así que las dos lecturas están disponibles.
+
+        Combina dos fuentes porque no siempre coinciden: el vínculo que SYSCOM
+        declara para la marca en /marcas/{id} (``category_ids``) y la marca de cada
+        modelo ya sincronizado en estas categorías (``product_ids.brand_id``). La
+        primera puede faltar aunque la segunda no -- medido el 11/09/2026: 82% de
+        las categorías con al menos un modelo no tenían ninguna marca declarada,
+        pese a que sus modelos sí traían marca propia.
         """
         if not categories:
             return self.env["sync.syscom.brand"].browse()
-        return self.env["sync.syscom.brand"].search([("category_ids", "in", categories.ids)])
+        declaradas = self.env["sync.syscom.brand"].search([("category_ids", "in", categories.ids)])
+        derivadas = categories.product_ids.mapped("brand_id")
+        return declaradas | derivadas
 
     def _frescura_de_marcas(self, marcas):
         """Cuántas marcas del alcance llevan sin refrescarse más de UMBRAL_MARCA_RANCIA_DIAS.
