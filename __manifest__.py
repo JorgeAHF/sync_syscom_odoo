@@ -27,6 +27,7 @@
         "views/website_sale_product_stock.xml",
         "views/product_template_views.xml",
         "views/website_sale_cart_syscom_error.xml",
+        "views/stock_confirm_wizard_views.xml",
         "data/cron.xml",
     ],
     "installable": True,

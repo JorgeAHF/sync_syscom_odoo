@@ -15,3 +15,4 @@ access_sync_syscom_health_abandoned_line_manager,access.sync.syscom.health.aband
 access_sync_syscom_health_publish_gap_line_manager,access.sync.syscom.health.publish.gap.line.manager,model_sync_syscom_health_publish_gap_line,sync_syscom.group_sync_syscom_manager,1,1,1,1
 access_sync_syscom_health_rate_limit_line_manager,access.sync.syscom.health.rate.limit.line.manager,model_sync_syscom_health_rate_limit_line,sync_syscom.group_sync_syscom_manager,1,1,1,1
 access_ir_cron_sync_syscom_manager_read,access.ir.cron.sync.syscom.manager.read,base.model_ir_cron,sync_syscom.group_sync_syscom_manager,1,0,0,0
+access_sync_syscom_stock_confirm_wizard_user,access.sync.syscom.stock.confirm.wizard.user,model_sync_syscom_stock_confirm_wizard,base.group_user,1,1,1,1

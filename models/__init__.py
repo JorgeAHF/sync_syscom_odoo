@@ -14,4 +14,5 @@ from . import syscom_brand
 from . import syscom_product
 from . import product_template
 from . import sale_order
+from . import stock_confirm_wizard
 from . import health_wizard

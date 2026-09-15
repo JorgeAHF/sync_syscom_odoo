@@ -14,19 +14,17 @@ class SaleOrder(models.Model):
         """Validate SYSCOM stock for dropship products.
 
         Rules:
-        - Uses existencia.nuevo from SYSCOM.
-        - Si la API falla (sin token, timeout, error de red): sigue bloqueando
-          la confirmación -- eso significa que no se pudo validar nada, no que
-          se validó y falta stock.
-        - Si el stock es insuficiente: YA NO bloquea. Decisión de Jorge
-          (12/09/2026): el 0 de SYSCOM puede no ser el 0 real -- HERGON puede
-          tener el producto por otra vía (stock propio, otro proveedor) que
-          este chequeo no ve. Ahora solo se junta como aviso preventivo y
-          quien confirma decide si de verdad se puede surtir.
+        - Uses existencia.nuevo from SYSCOM. Solo ese dato -- a propósito no
+          se suma el stock propio de HERGON aquí; eso es otro campo y otra
+          decisión (ver syscom_stock_propio en product_template.py).
+        - Si la API falla (sin token, timeout, error de red): bloquea --
+          significa que no se pudo validar nada, no que se validó y falta.
+        - Si el stock es insuficiente: NO bloquea aquí. Se junta como aviso
+          para que el asistente lo muestre antes de confirmar de verdad --
+          ver action_confirm() y sync.syscom.stock.confirm.wizard.
 
         Devuelve una lista de dicts (order, name, disponible, solicitado) con
-        los avisos de stock insuficiente encontrados, para que action_confirm
-        los muestre sin frenar la confirmación.
+        los avisos de stock insuficiente encontrados.
         """
         params = self.env["ir.config_parameter"].sudo()
         token = (params.get_param("sync_syscom.syscom_api_token") or "").strip()
@@ -93,48 +91,37 @@ class SaleOrder(models.Model):
                     })
         return avisos
 
-    def _syscom_post_stock_warnings(self, avisos):
-        """Deja constancia en el chatter de cada orden con avisos, uno por orden."""
-        for order in self:
-            avisos_orden = [a for a in avisos if a["order"] == order]
-            if not avisos_orden:
-                continue
-            lineas = "\n".join(
-                _("- %(name)s: disponible en SYSCOM %(s)s, solicitado %(q)s")
-                % {"name": a["name"], "s": a["disponible"], "q": a["solicitado"]}
-                for a in avisos_orden
-            )
-            order.message_post(
-                body=_(
-                    "⚠ Aviso de stock SYSCOM al confirmar (no bloqueó la venta):\n%s"
-                ) % lineas
-            )
+    def _syscom_open_stock_warning_wizard(self, avisos):
+        lineas = "\n".join(
+            _("- %(order)s · %(name)s: disponible en SYSCOM %(s)s, solicitado %(q)s")
+            % {
+                "order": a["order"].name,
+                "name": a["name"],
+                "s": a["disponible"],
+                "q": a["solicitado"],
+            }
+            for a in avisos
+        )
+        wizard = self.env["sync.syscom.stock.confirm.wizard"].create({
+            "order_ids": [(6, 0, self.ids)],
+            "message": lineas,
+        })
+        return {
+            "type": "ir.actions.act_window",
+            "res_model": "sync.syscom.stock.confirm.wizard",
+            "view_mode": "form",
+            "res_id": wizard.id,
+            "target": "new",
+        }
 
     def action_confirm(self):
-        # Validación de SYSCOM: bloquea solo si no se pudo consultar (sin token,
-        # error de red). Si se pudo consultar y el stock no alcanza, ya no
-        # bloquea -- se confirma la orden y queda el aviso en el chatter y en
-        # una notificación al momento del clic.
-        avisos = self._syscom_validate_stock_or_raise(stage="confirm")
-        result = super().action_confirm()
-        if avisos:
-            self._syscom_post_stock_warnings(avisos)
-            # Si el confirm de Odoo no devolvió su propia acción de cliente
-            # (wizard, redirección, etc.), aprovechamos el hueco para mostrar
-            # el aviso como notificación. Si sí devolvió algo, se respeta tal
-            # cual -- no lo pisamos.
-            if not isinstance(result, dict):
-                return {
-                    "type": "ir.actions.client",
-                    "tag": "display_notification",
-                    "params": {
-                        "title": _("Aviso de stock SYSCOM"),
-                        "message": _(
-                            "Se confirmó la orden, pero SYSCOM reportó stock insuficiente "
-                            "para %(n)s producto(s). Revisa el detalle en el chatter de la orden."
-                        ) % {"n": len(avisos)},
-                        "type": "warning",
-                        "sticky": True,
-                    },
-                }
-        return result
+        # El aviso de SYSCOM ahora es informativo: si hay stock insuficiente,
+        # se detiene aquí y se abre un asistente para que la persona decida.
+        # Solo se confirma de verdad si aprieta "Confirmar de todas formas"
+        # (eso llega con sync_syscom_skip_stock_check en el contexto, para no
+        # volver a abrir el mismo asistente en el segundo intento).
+        if not self.env.context.get("sync_syscom_skip_stock_check"):
+            avisos = self._syscom_validate_stock_or_raise(stage="confirm")
+            if avisos:
+                return self._syscom_open_stock_warning_wizard(avisos)
+        return super().action_confirm()
