@@ -92,6 +92,24 @@ class ProductTemplate(models.Model):
     syscom_features_json = fields.Json(
         string="Características SYSCOM",
     )
+    syscom_icono_sup_izq = fields.Char(
+        string="Ícono SYSCOM (sup. izq.)",
+        help="URL del ícono de característica que SYSCOM ubica en la esquina "
+             "superior izquierda de la tarjeta del producto. Solo dato; el "
+             "dibujado en la tienda vive en hergon_tema, no aquí.",
+    )
+    syscom_icono_sup_der = fields.Char(
+        string="Ícono SYSCOM (sup. der.)",
+        help="Igual que syscom_icono_sup_izq, esquina superior derecha.",
+    )
+    syscom_icono_inf_izq = fields.Char(
+        string="Ícono SYSCOM (inf. izq.)",
+        help="Igual que syscom_icono_sup_izq, esquina inferior izquierda.",
+    )
+    syscom_icono_inf_der = fields.Char(
+        string="Ícono SYSCOM (inf. der.)",
+        help="Igual que syscom_icono_sup_izq, esquina inferior derecha.",
+    )
 
     def _has_syscom_vendor(self):
         """Return True if the template has at least one vendor marked as SYSCOM."""

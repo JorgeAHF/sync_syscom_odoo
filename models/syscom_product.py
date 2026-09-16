@@ -82,6 +82,7 @@ class SyscomProduct(models.Model):
 
     def _extract_extended_detail_values(self, detail):
         detail = detail or {}
+        iconos = detail.get("iconos") or {}
         return {
             "warranty_text": (detail.get("garantia") or "").strip() or False,
             "weight_value": self._to_optional_float(detail.get("peso")),
@@ -89,6 +90,14 @@ class SyscomProduct(models.Model):
             "length_value": self._to_optional_float(detail.get("largo")),
             "width_value": self._to_optional_float(detail.get("ancho")),
             "features_lines": self._normalize_feature_lines(detail),
+            # Iconos de característica que SYSCOM ubica en las 4 esquinas de la
+            # tarjeta del producto (solo dato -- no hay caché de respaldo en
+            # staging como los demás campos de esta función: si SYSCOM no los
+            # manda en este refresco, se guarda vacío, no se inventa un viejo).
+            "icono_sup_izq": (iconos.get("sup_izq") or "").strip() or False,
+            "icono_sup_der": (iconos.get("sup_der") or "").strip() or False,
+            "icono_inf_izq": (iconos.get("inf_izq") or "").strip() or False,
+            "icono_inf_der": (iconos.get("inf_der") or "").strip() or False,
         }
 
     def _detail_has_extended_values(self, detail):
@@ -365,6 +374,15 @@ class SyscomProduct(models.Model):
     def _apply_extended_values_to_template(self, template, detail, staging_product=None):
         template = template.sudo()
         extended = self._extract_extended_detail_values(detail)
+        # Los iconos no tienen respaldo en staging (ver _extract_extended_detail_values),
+        # así que se guardan aparte antes de que el bloque de abajo reemplace
+        # `extended` por completo -- si no, desaparecerían del dict.
+        iconos = {
+            "icono_sup_izq": extended["icono_sup_izq"],
+            "icono_sup_der": extended["icono_sup_der"],
+            "icono_inf_izq": extended["icono_inf_izq"],
+            "icono_inf_der": extended["icono_inf_der"],
+        }
         if staging_product:
             extended = {
                 "warranty_text": staging_product.warranty_text or extended["warranty_text"],
@@ -382,6 +400,10 @@ class SyscomProduct(models.Model):
             "syscom_length_cm": extended["length_value"] or False,
             "syscom_width_cm": extended["width_value"] or False,
             "syscom_features_json": extended["features_lines"] or [],
+            "syscom_icono_sup_izq": iconos["icono_sup_izq"] or False,
+            "syscom_icono_sup_der": iconos["icono_sup_der"] or False,
+            "syscom_icono_inf_izq": iconos["icono_inf_izq"] or False,
+            "syscom_icono_inf_der": iconos["icono_inf_der"] or False,
         }
         if "weight" in template._fields:
             vals["weight"] = extended["weight_value"] or False
