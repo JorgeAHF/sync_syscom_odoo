@@ -14,6 +14,7 @@
                     <field name="updated_products"/>
                     <field name="updated_templates"/>
                     <field name="remote_fetches"/>
+                    <field name="failed_products"/>
                     <field name="last_error"/>
                 </list>
             </field>
@@ -41,6 +42,7 @@
                             <field name="skipped_products" readonly="1"/>
                         </group>
                         <group string="Errores">
+                            <field name="failed_products" readonly="1"/>
                             <field name="last_error" readonly="1"/>
                         </group>
                     </sheet>

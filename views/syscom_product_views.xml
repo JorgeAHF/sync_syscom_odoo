@@ -1,11 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
     <data>
-        <!-- Server action declared before being referenced -->
+        <!-- Server action declared before being referenced.
+
+             Ninguna de estas acciones lleva binding_model_id: todas tienen su propio
+             botón en la barra de la lista, y el binding las duplicaba en el menú
+             Acciones. Si vuelves a añadirlo, reaparece el duplicado. -->
         <record id="server_action_publish_syscom_products" model="ir.actions.server">
-            <field name="name">Publicar selección vista</field>
+            <field name="name">Publicar lo seleccionado en la tienda</field>
             <field name="model_id" ref="model_sync_syscom_product"/>
-            <field name="binding_model_id" ref="model_sync_syscom_product"/>
             <field name="binding_type">action</field>
             <field name="state">code</field>
             <field name="code">
@@ -16,7 +19,6 @@
         <record id="server_action_publish_syscom_products_marked" model="ir.actions.server">
             <field name="name">Publicar marcados en lote</field>
             <field name="model_id" ref="model_sync_syscom_product"/>
-            <field name="binding_model_id" ref="model_sync_syscom_product"/>
             <field name="binding_type">action</field>
             <field name="state">code</field>
             <field name="code">
@@ -27,7 +29,6 @@
         <record id="server_action_recompute_syscom_costs" model="ir.actions.server">
             <field name="name">Recalcular costos SYSCOM</field>
             <field name="model_id" ref="model_sync_syscom_product"/>
-            <field name="binding_model_id" ref="model_sync_syscom_product"/>
             <field name="binding_type">action</field>
             <field name="state">code</field>
             <field name="code">
@@ -38,7 +39,6 @@
         <record id="server_action_configure_syscom_dropshipping" model="ir.actions.server">
             <field name="name">Configurar dropshipping SYSCOM</field>
             <field name="model_id" ref="model_sync_syscom_product"/>
-            <field name="binding_model_id" ref="model_sync_syscom_product"/>
             <field name="binding_type">action</field>
             <field name="state">code</field>
             <field name="code">
@@ -47,9 +47,8 @@
         </record>
 
         <record id="server_action_sync_catalog_models" model="ir.actions.server">
-            <field name="name">Sincronizar catálogo de modelos desde SYSCOM</field>
+            <field name="name">Traer modelos nuevos de SYSCOM</field>
             <field name="model_id" ref="model_sync_syscom_product"/>
-            <field name="binding_model_id" ref="model_sync_syscom_product"/>
             <field name="binding_type">action</field>
             <field name="state">code</field>
             <field name="code">
@@ -60,11 +59,20 @@
         <record id="server_action_sync_extended_product_data" model="ir.actions.server">
             <field name="name">Actualizar datos extendidos SYSCOM</field>
             <field name="model_id" ref="model_sync_syscom_product"/>
-            <field name="binding_model_id" ref="model_sync_syscom_product"/>
             <field name="binding_type">action</field>
             <field name="state">code</field>
             <field name="code">
                 action = env["sync.syscom.product"].action_start_sync_extended_product_data()
+            </field>
+        </record>
+
+        <record id="server_action_reset_publish_state" model="ir.actions.server">
+            <field name="name">Reiniciar estado de publicación</field>
+            <field name="model_id" ref="model_sync_syscom_product"/>
+            <field name="binding_type">action</field>
+            <field name="state">code</field>
+            <field name="code">
+                action = records.action_reset_publish_state()
             </field>
         </record>
 
@@ -77,7 +85,10 @@
                         <button
                             name="%(server_action_sync_catalog_models)d"
                             type="action"
-                            string="Sincronizar catálogo desde SYSCOM"
+                            string="Traer modelos nuevos de SYSCOM"
+                            title="Trae los modelos nuevos del catálogo completo de SYSCOM. No respeta tu selección: aplica a todas las marcas."
+                            confirm="Trae los modelos nuevos del catálogo completo de SYSCOM. Esto afecta TODO el catálogo, no tu selección."
+                            confirm-label="Continuar"
                             class="btn-primary"
                             groups="sync_syscom.group_sync_syscom_manager"
                         />
@@ -85,6 +96,9 @@
                             name="%(server_action_recompute_syscom_costs)d"
                             type="action"
                             string="Recalcular costos SYSCOM"
+                            title="Recalcula el costo de todo el catálogo ya sincronizado (no vuelve a consultar a SYSCOM). No respeta tu selección."
+                            confirm="Recalcula el costo de todo el catálogo ya sincronizado. Esto afecta TODO el catálogo, no tu selección."
+                            confirm-label="Continuar"
                             class="btn-secondary"
                             groups="sync_syscom.group_sync_syscom_manager"
                         />
@@ -92,6 +106,9 @@
                             name="%(server_action_configure_syscom_dropshipping)d"
                             type="action"
                             string="Configurar dropshipping"
+                            title="Ajusta la configuración de proveedor sobre todo el catálogo ya sincronizado. No respeta tu selección."
+                            confirm="Ajusta la configuración de proveedor sobre todo el catálogo ya sincronizado. Esto afecta TODO el catálogo, no tu selección."
+                            confirm-label="Continuar"
                             class="btn-secondary"
                             groups="sync_syscom.group_sync_syscom_manager"
                         />
@@ -99,25 +116,29 @@
                             name="%(server_action_sync_extended_product_data)d"
                             type="action"
                             string="Actualizar datos extendidos"
+                            title="Sincronización masiva: consulta a SYSCOM todo el catálogo, uno por uno. No respeta tu selección. Requiere autorización antes de usarse."
+                            confirm="REGLA DURA 1 — consumo real de cuota SYSCOM. Sincronización masiva: consulta a SYSCOM todo el catálogo, uno por uno —miles de llamadas reales, compartidas con producción—. No respeta tu selección."
+                            confirm-label="Confirmo que tengo autorización para esta sincronización masiva"
                             class="btn-secondary"
                             groups="sync_syscom.group_sync_syscom_manager"
                         />
                         <button
                             name="%(server_action_publish_syscom_products)d"
                             type="action"
-                            string="Publicar selección vista"
+                            string="Publicar lo seleccionado en la tienda"
+                            title="Encola para publicar los productos seleccionados en esta lista. Respeta tu selección; si falta stock, no se publica aunque el proceso termine sin error."
                             class="btn-primary"
                             groups="sync_syscom.group_sync_syscom_manager"
                         />
                         <button
-                            name="%(server_action_publish_syscom_products_marked)d"
+                            name="%(server_action_reset_publish_state)d"
                             type="action"
-                            string="Publicar marcados en lote"
+                            string="Reiniciar estado de publicación"
                             class="btn-secondary"
                             groups="sync_syscom.group_sync_syscom_manager"
+                            title="Limpia error y reintentos de los productos seleccionados en esta lista para que vuelvan a intentarse. Respeta tu selección."
                         />
                     </header>
-                    <field name="selected" string="Lote"/>
                     <field name="name"/>
                     <field name="model"/>
                     <field name="brand_id"/>
@@ -146,7 +167,6 @@
                 <form string="Modelo SYSCOM">
                     <sheet>
                         <group>
-                            <field name="selected" string="Lote"/>
                             <field name="name"/>
                             <field name="model"/>
                             <field name="syscom_id"/>

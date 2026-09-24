@@ -1,8 +1,31 @@
-from odoo import fields, models
-from odoo.exceptions import UserError
+from datetime import timedelta
 from urllib.parse import urlparse, urlunparse
 
+from odoo import _, fields, models
+from odoo.exceptions import UserError
+
+from .job_feedback import (
+    CRON_PUBLICAR,
+    MENU_TRABAJOS_COSTOS,
+    MENU_TRABAJOS_DATOS,
+    MENU_TRABAJOS_DROPSHIP,
+    MENU_TRABAJOS_PUBLICACION,
+    MENU_TRABAJOS_SYNC,
+    aplazar_por_rate_limit,
+    reiniciar_aplazamientos,
+    segundos_de_pausa_restantes,
+)
+from .syscom_client import SyscomRateLimitError
+
+# Rutas de pausa por rate limit. Una por cron que sale a la API: el 429 es global, pero
+# pausar la ruta entera es lo que impide que cada cron vuelva a intentarlo al minuto.
+RUTA_PUBLICAR = "publicar_seleccionados"   # cron 60
+RUTA_STOCK = "refresco_stock"              # cron 58
+
 from .constants import (
+    DEFAULT_RETIRADO_404_MIN_HORAS,
+    DEFAULT_RETIRADO_404_MIN_INTENTOS,
+    DEFAULT_STOCK_REFRESH_CYCLE_DAYS,
     SYSCOM_DEFAULT_BASE_URL,
     SYSCOM_DEFAULT_TIMEOUT,
     DEFAULT_PUBLISH_BATCH_SIZE,
@@ -13,6 +36,7 @@ from .constants import (
 
 class SyscomProduct(models.Model):
     _name = "sync.syscom.product"
+    _inherit = ["sync.syscom.job.feedback"]
     _description = "Producto SYSCOM (staging)"
     _order = "model"
 
@@ -58,6 +82,7 @@ class SyscomProduct(models.Model):
 
     def _extract_extended_detail_values(self, detail):
         detail = detail or {}
+        iconos = detail.get("iconos") or {}
         return {
             "warranty_text": (detail.get("garantia") or "").strip() or False,
             "weight_value": self._to_optional_float(detail.get("peso")),
@@ -65,6 +90,14 @@ class SyscomProduct(models.Model):
             "length_value": self._to_optional_float(detail.get("largo")),
             "width_value": self._to_optional_float(detail.get("ancho")),
             "features_lines": self._normalize_feature_lines(detail),
+            # Iconos de característica que SYSCOM ubica en las 4 esquinas de la
+            # tarjeta del producto (solo dato -- no hay caché de respaldo en
+            # staging como los demás campos de esta función: si SYSCOM no los
+            # manda en este refresco, se guarda vacío, no se inventa un viejo).
+            "icono_sup_izq": (iconos.get("sup_izq") or "").strip() or False,
+            "icono_sup_der": (iconos.get("sup_der") or "").strip() or False,
+            "icono_inf_izq": (iconos.get("inf_izq") or "").strip() or False,
+            "icono_inf_der": (iconos.get("inf_der") or "").strip() or False,
         }
 
     def _detail_has_extended_values(self, detail):
@@ -341,6 +374,15 @@ class SyscomProduct(models.Model):
     def _apply_extended_values_to_template(self, template, detail, staging_product=None):
         template = template.sudo()
         extended = self._extract_extended_detail_values(detail)
+        # Los iconos no tienen respaldo en staging (ver _extract_extended_detail_values),
+        # así que se guardan aparte antes de que el bloque de abajo reemplace
+        # `extended` por completo -- si no, desaparecerían del dict.
+        iconos = {
+            "icono_sup_izq": extended["icono_sup_izq"],
+            "icono_sup_der": extended["icono_sup_der"],
+            "icono_inf_izq": extended["icono_inf_izq"],
+            "icono_inf_der": extended["icono_inf_der"],
+        }
         if staging_product:
             extended = {
                 "warranty_text": staging_product.warranty_text or extended["warranty_text"],
@@ -358,6 +400,10 @@ class SyscomProduct(models.Model):
             "syscom_length_cm": extended["length_value"] or False,
             "syscom_width_cm": extended["width_value"] or False,
             "syscom_features_json": extended["features_lines"] or [],
+            "syscom_icono_sup_izq": iconos["icono_sup_izq"] or False,
+            "syscom_icono_sup_der": iconos["icono_sup_der"] or False,
+            "syscom_icono_inf_izq": iconos["icono_inf_izq"] or False,
+            "syscom_icono_inf_der": iconos["icono_inf_der"] or False,
         }
         if "weight" in template._fields:
             vals["weight"] = extended["weight_value"] or False
@@ -1152,46 +1198,127 @@ class SyscomProduct(models.Model):
         })
 
     def cron_update_stock_selected(self):
-        """Cron background: refresca stock (nuevo), precios y costo de productos SYSCOM publicados.
+        """Cron background: refresca stock (nuevo), precios y costo de productos SYSCOM.
 
-        El cron puede ejecutarse con frecuencia corta, pero se "salta" si aún no toca según settings.
+        Orquestador. El trabajo de verdad esta en cuatro metodos, uno por etapa, porque
+        aqui vivian ~300 lineas con dos pasadas que compartian contadores, tres
+        compuertas y la gestion del cursor repartida en cuatro sitios.
         """
         params = self.env["ir.config_parameter"].sudo()
-        enabled_raw = params.get_param("sync_syscom.stock_refresh_enabled")
-        if str(enabled_raw).strip().lower() in ("false", "0", "no", ""):
+        now = fields.Datetime.now()
+
+        if not self._debe_correr_el_refresco(params, now):
             return
 
-        try:
-            hours = float(params.get_param("sync_syscom.stock_refresh_hours") or 4)
-        except (TypeError, ValueError):
-            hours = 4
-        if hours < 0:
-            hours = 0
-
-        now = fields.Datetime.now()
-        last_run = params.get_param("sync_syscom.stock_refresh_last_run")
-        if last_run:
-            try:
-                last_dt = fields.Datetime.from_string(last_run)
-                if last_dt and (now - last_dt).total_seconds() < hours * 3600:
-                    return
-            except (TypeError, ValueError):
-                pass
-
         client = self._get_client()
+        contexto = self._contexto_del_lote(client, params)
+        if contexto is None:
+            return   # 429 en el tipo de cambio: la ruta ya quedo pausada
+        exchange_rate, price_currency, min_stock = contexto
 
-        # Tipo de cambio (una semana) por lote
-        rate_payload = client.get_exchange_rate() or {}
+        r1 = self._refrescar_staging_marcados(client, params, exchange_rate, price_currency, now)
+        r2 = self._refrescar_plantillas_lote(
+            client, params, exchange_rate, price_currency, min_stock, now,
+            rate_limit_previo=r1["rate_limit"],
+        )
+        self._cerrar_corrida_de_refresco(params, now, r1, r2)
+
+    def _debe_correr_el_refresco(self, params, now):
+        """Las compuertas que deciden si esta corrida hace algo.
+
+        **Se comprueban todas ANTES de tocar la API**, y eso no es un detalle de estilo:
+        `_contexto_del_lote` pide el tipo de cambio, así que una compuerta puesta después
+        gastaría una llamada cada 15 minutos durante toda la semana de descanso —672 por
+        semana— sin refrescar absolutamente nada.
+        """
+        enabled_raw = params.get_param("sync_syscom.stock_refresh_enabled")
+        if str(enabled_raw).strip().lower() in ("false", "0", "no", ""):
+            return False
+
+        # Descanso entre vueltas completas al catálogo. El cursor a 0 marca "entre
+        # ciclos"; si además hay fecha de cierre, se respeta la espera. Sin fecha de
+        # cierre es que nunca ha dado una vuelta, y entonces arranca ya.
+        if self._esta_descansando_entre_ciclos(params, now):
+            return False
+
+        # Este cron corre cada 15 min: sin esta comprobación volvería a la API en cuanto
+        # SYSCOM lo hubiera echado con un 429.
+        if segundos_de_pausa_restantes(self.env, RUTA_STOCK):
+            return False
+
+        return True
+
+    def _esta_descansando_entre_ciclos(self, params, now):
+        """True mientras dure el descanso posterior a una vuelta completa al catálogo."""
+        try:
+            last_id = int(params.get_param("sync_syscom.stock_refresh_last_id") or 0)
+        except (TypeError, ValueError):
+            last_id = 0
+        if last_id:
+            return False   # ciclo a medias: nunca se descansa a mitad de vuelta
+
+        cerrado_raw = params.get_param("sync_syscom.stock_refresh_cycle_closed_at")
+        if not cerrado_raw:
+            return False
+        try:
+            cerrado = fields.Datetime.from_string(cerrado_raw)
+        except (TypeError, ValueError):
+            return False
+        if not cerrado:
+            return False
+
+        try:
+            dias = float(params.get_param("sync_syscom.stock_refresh_cycle_days")
+                         or DEFAULT_STOCK_REFRESH_CYCLE_DAYS)
+        except (TypeError, ValueError):
+            dias = DEFAULT_STOCK_REFRESH_CYCLE_DAYS
+        return (now - cerrado) < timedelta(days=max(dias, 0))
+
+    def _cerrar_ciclo_de_refresco(self, params, now):
+        """Se ha dado la vuelta entera al catálogo: cursor a 0 y a esperar."""
+        params.set_param("sync_syscom.stock_refresh_last_id", "0")
+        params.set_param("sync_syscom.stock_refresh_cycle_closed_at",
+                         fields.Datetime.to_string(now))
+        try:
+            dias = float(params.get_param("sync_syscom.stock_refresh_cycle_days")
+                         or DEFAULT_STOCK_REFRESH_CYCLE_DAYS)
+        except (TypeError, ValueError):
+            dias = DEFAULT_STOCK_REFRESH_CYCLE_DAYS
+        self.env["sync.syscom.log"].sudo().create({
+            "name": "Refresco stock/precios SYSCOM",
+            "kind": "info",
+            "message": ("Vuelta completa al catálogo terminada. El siguiente ciclo "
+                        "empieza en %s días (%s)."
+                        % (dias, fields.Datetime.to_string(now + timedelta(days=dias)))),
+        })
+
+    def _contexto_del_lote(self, client, params):
+        """Tipo de cambio y ajustes que comparten las dos pasadas. None si hubo 429."""
+        # Va antes de las dos pasadas, así que un 429 aquí dejaba morir el cron entero
+        # sin pausar nada ni dejar rastro propio.
+        try:
+            rate_payload = client.get_exchange_rate() or {}
+        except SyscomRateLimitError as exc:
+            aplazar_por_rate_limit(
+                self.env, RUTA_STOCK, exc, "Refresco de stock/precios (tipo de cambio)",
+                cron_xmlid="sync_syscom.cron_sync_syscom_stock_daily",
+                con_tope=False,
+            )
+            return None
         try:
             exchange_rate = float(rate_payload.get("una_semana") or rate_payload.get("normal") or 1.0)
         except (TypeError, ValueError):
             exchange_rate = 1.0
         price_currency = params.get_param("sync_syscom.price_currency") or "usd"
         min_stock = max(1, int(params.get_param("sync_syscom.min_stock") or 1))
+        return exchange_rate, price_currency, min_stock
 
-        # 1) Refresh staging "selected" (mantener info interna)
+    def _refrescar_staging_marcados(self, client, params, exchange_rate, price_currency, now):
+        """Pasada 1: refresca los `sync.syscom.product` marcados en lote."""
+
         selected = self._get_marked_for_batch()
-        updated = failed = 0
+        staging_fallidos = 0
+        rate_limit = None
         for prod in selected:
             try:
                 detail = client.get_product_detail(prod.syscom_id) or {}
@@ -1228,10 +1355,30 @@ class SyscomProduct(models.Model):
                     "sync_error": False,
                 })
                 self._apply_extended_values_to_product(prod, detail)
+            except SyscomRateLimitError as exc:
+                rate_limit = exc
+                break
             except Exception as exc:
-                prod.write({"sync_error": str(exc), "synced_at": now})
+                # OJO: aquí NO se escribe `synced_at`. Un intento fallido no sincronizó
+                # nada, así que ponerle la fecha de ahora convierte el campo en una
+                # mentira: dice "actualizado hace un minuto" sobre datos viejos, y el
+                # valor bueno se pierde para siempre (el campo no lleva tracking).
+                prod.write({"sync_error": str(exc)})
+                staging_fallidos += 1
 
-        # 2) Refresh product.template publicados (eCommerce) -- POR LOTES
+
+        return {"selected": selected, "staging_fallidos": staging_fallidos, "rate_limit": rate_limit}
+
+    def _refrescar_plantillas_lote(self, client, params, exchange_rate, price_currency,
+                                   min_stock, now, rate_limit_previo=None):
+        """Pasada 2: refresca un lote de `product.template`. Es la que alimenta la tienda."""
+        rate_limit = rate_limit_previo
+        # `updated` y `failed` se inicializaban en la pasada 1 y se incrementaban aquí:
+        # dos pasadas distintas compartiendo contadores. La extracción lo destapó.
+        # Los valores que contaban siempre fueron los de esta pasada, así que arrancan
+        # en cero aquí y el resumen sigue diciendo lo mismo.
+        updated = failed = 0
+
         Template = self.env["product.template"].sudo()
 
         try:
@@ -1249,85 +1396,216 @@ class SyscomProduct(models.Model):
         base_domain = [
             ("syscom_is_product", "=", True),
             ("syscom_product_id", "!=", False),
-            ("is_published", "=", True),
+            # OJO: aqui NO va un filtro por is_published. Con el, un producto que se
+            # despublicaba por falta de stock salia del barrido para siempre y nunca
+            # volvia, aunque SYSCOM recuperara existencia. La logica de rescate ya
+            # existe mas abajo (if stock_ok and not currently_published), pero era
+            # codigo muerto porque este dominio garantizaba lo contrario.
         ]
         domain = base_domain + [("id", ">", last_id)]
         templates = Template.search(domain, order="id", limit=batch_size)
 
         if not templates:
-            params.set_param("sync_syscom.stock_refresh_last_id", "0")
-            templates = Template.search(base_domain, order="id", limit=batch_size)
+            # Fin de vuelta al catálogo. Antes se reiniciaba el cursor y se arrancaba el
+            # ciclo siguiente en la misma corrida, sin descanso. Ahora se cierra el ciclo
+            # y se anota la fecha: la espera la aplica `_debe_correr_el_refresco`.
+            self._cerrar_ciclo_de_refresco(params, now)
+            return {
+                "templates": Template.browse(), "atendidas": Template.browse(),
+                "updated": 0, "failed": 0, "retirados": 0, "despublicados": 0,
+                "sin_proveedor": 0, "rate_limit": None, "ciclo_cerrado": True,
+            }
 
-        for tmpl in templates:
+        atendidas = Template.browse()
+        sin_proveedor = 0
+        retirados = 0
+        despublicados = 0
+
+        # Si la pasada 1 ya chocó con el rate limit, no se insiste con las 200 de esta.
+        for tmpl in (templates if not rate_limit else Template.browse()):
             if not tmpl._has_syscom_vendor():
+                sin_proveedor += 1
                 continue
+            atendidas |= tmpl
             try:
-                detail = client.get_product_detail(tmpl.syscom_product_id) or {}
-                existencia = detail.get("existencia") or {}
-                stock_new = int(existencia.get("nuevo") or 0)
+                # Savepoint por plantilla: si el fallo es de base de datos, sin él el
+                # cursor queda abortado y el write del except revienta, matando el lote
+                # entero. Mismo patrón que 4ac7507 y 6c74242.
+                with self.env.cr.savepoint():
+                    detail = client.get_product_detail(tmpl.syscom_product_id) or {}
+                    existencia = detail.get("existencia") or {}
+                    stock_new = int(existencia.get("nuevo") or 0)
 
-                unidad = detail.get("unidad_de_medida") or {}
-                uom_sat = (unidad.get("clave_unidad_sat") or "").strip()
-                sat_key = detail.get("sat_key") or detail.get("sat") or ""
-                sat_description = detail.get("sat_description") or ""
+                    unidad = detail.get("unidad_de_medida") or {}
+                    uom_sat = (unidad.get("clave_unidad_sat") or "").strip()
+                    sat_key = detail.get("sat_key") or detail.get("sat") or ""
+                    sat_description = detail.get("sat_description") or ""
 
-                precios = detail.get("precios") or {}
-                price_list = self._to_float(precios.get("precio_lista"))
-                price_special = self._to_float(precios.get("precio_especial"))
-                price_discounts = self._to_float(precios.get("precio_descuento") or precios.get("precio_descuentos"))
-                if price_currency == "usd":
-                    price_list_mxn = price_list * exchange_rate
-                    price_special_mxn = price_special * exchange_rate
-                    price_discounts_mxn = price_discounts * exchange_rate
-                else:
-                    price_list_mxn = price_list
-                    price_special_mxn = price_special
-                    price_discounts_mxn = price_discounts
+                    precios = detail.get("precios") or {}
+                    price_list = self._to_float(precios.get("precio_lista"))
+                    price_special = self._to_float(precios.get("precio_especial"))
+                    price_discounts = self._to_float(precios.get("precio_descuento") or precios.get("precio_descuentos"))
+                    if price_currency == "usd":
+                        price_list_mxn = price_list * exchange_rate
+                        price_special_mxn = price_special * exchange_rate
+                        price_discounts_mxn = price_discounts * exchange_rate
+                    else:
+                        price_list_mxn = price_list
+                        price_special_mxn = price_special
+                        price_discounts_mxn = price_discounts
 
-                tmpl.write({
-                    "list_price": price_list_mxn,
-                    "syscom_stock_new": stock_new,
-                    "syscom_stock_synced_at": now,
-                    "syscom_api_ok": True,
-                    "syscom_uom_sat": uom_sat or False,
-                })
-                self._sync_template_unspsc_from_sat(tmpl, sat_key, sat_description)
-                self._sync_template_uom_from_sat(tmpl, uom_sat)
-                self._update_template_pricelists_and_cost(tmpl, {
-                    "list_price_mxn": price_list_mxn,
-                    "special_price_mxn": price_special_mxn,
-                    "discount_price_mxn": price_discounts_mxn,
-                }, params)
-                staging_product = self.search([("syscom_id", "=", tmpl.syscom_product_id)], limit=1)
-                if staging_product:
-                    self._apply_extended_values_to_product(staging_product, detail)
-                self._apply_extended_values_to_template(tmpl, detail, staging_product=staging_product)
-                # Enforce documents visibility on the website (URLs from SYSCOM resources)
-                self._ensure_template_documents_published(tmpl)
-                stock_ok = stock_new >= min_stock
-                currently_published = getattr(tmpl, "is_published", False)
-                if stock_ok and not currently_published:
-                    self._ensure_template_published_on_website(tmpl)
-                elif not stock_ok and currently_published and "is_published" in tmpl._fields:
-                    tmpl.write({"is_published": False})
+                    tmpl.write({
+                        "list_price": price_list_mxn,
+                        "syscom_stock_new": stock_new,
+                        "syscom_stock_synced_at": now,
+                        "syscom_api_ok": True,
+                        "syscom_sync_error": False,
+                        # Un refresco bueno prueba que el producto vive: la racha de
+                        # 404 se corta aquí y solo aquí.
+                        "syscom_404_consecutivos": 0,
+                        "syscom_404_desde": False,
+                        "syscom_uom_sat": uom_sat or False,
+                    })
+                    self._sync_template_unspsc_from_sat(tmpl, sat_key, sat_description)
+                    self._sync_template_uom_from_sat(tmpl, uom_sat)
+                    self._update_template_pricelists_and_cost(tmpl, {
+                        "list_price_mxn": price_list_mxn,
+                        "special_price_mxn": price_special_mxn,
+                        "discount_price_mxn": price_discounts_mxn,
+                    }, params)
+                    staging_product = self.search([("syscom_id", "=", tmpl.syscom_product_id)], limit=1)
+                    if staging_product:
+                        self._apply_extended_values_to_product(staging_product, detail)
+                    self._apply_extended_values_to_template(tmpl, detail, staging_product=staging_product)
+                    # Enforce documents visibility on the website (URLs from SYSCOM resources)
+                    self._ensure_template_documents_published(tmpl)
+                    # Blindaje: si HERGON tiene stock propio en bodega, el producto
+                    # no se despublica aunque SYSCOM no alcance el minimo.
+                    stock_propio = getattr(tmpl, 'syscom_stock_propio', 0) or 0
+                    stock_ok = (stock_new >= min_stock) or (stock_propio > 0)
+                    currently_published = getattr(tmpl, "is_published", False)
+                    if stock_ok and not currently_published:
+                        self._ensure_template_published_on_website(tmpl)
+                    elif not stock_ok and currently_published and "is_published" in tmpl._fields:
+                        tmpl.write({"is_published": False})
                 updated += 1
-            except Exception:
-                tmpl.write({"syscom_api_ok": False, "syscom_stock_synced_at": now})
+            except SyscomRateLimitError as exc:
+                # Caso 1 de 3: la API está saturada. No dice NADA de esta plantilla, así
+                # que no se la marca como fallida ni se toca su estado. Se corta el lote
+                # y se pausa la ruta; el resto del lote se reintenta enseguida en vez de
+                # esperar el ciclo completo de ~7 h.
+                atendidas -= tmpl
+                rate_limit = exc
+                break
+            except Exception as exc:
+                mensaje_error = str(exc)
+                definitivo = self._es_error_definitivo(mensaje_error)
+                # Caso 3 de 3: fallo real de sincronización.
+                # En los dos, `syscom_stock_synced_at` NO se toca — ver el commit
+                # anterior. `syscom_api_ok = False` sí es verdad y se queda.
                 failed += 1
+                vals = {"syscom_api_ok": False, "syscom_sync_error": mensaje_error}
+                nota = ""
 
-        if templates:
+                if definitivo:
+                    # Caso 2 de 3: SYSCOM retiró el producto de su catálogo.
+                    retirados += 1
+                    vals["syscom_404_consecutivos"] = (tmpl.syscom_404_consecutivos or 0) + 1
+                    if not tmpl.syscom_404_desde:
+                        vals["syscom_404_desde"] = now
+                    if self._toca_despublicar_retirado(tmpl, vals, params, now):
+                        vals["is_published"] = False
+                        despublicados += 1
+                        nota = "Retirado de SYSCOM, DESPUBLICADO. "
+                    else:
+                        nota = "Retirado de SYSCOM, sigue publicado. "
+                # Un error que no sea 404 no toca los contadores de retirada: no prueba
+                # que el producto viva, así que tampoco corta la racha.
+
+                tmpl.write(vals)
+                self.env["sync.syscom.log"].sudo().create({
+                    "name": "Error refresco stock (plantilla)",
+                    "kind": "error",
+                    "message": "%(label)s [%(syscom)s]. %(nota)sError: %(err)s." % {
+                        "label": tmpl.display_name,
+                        "syscom": tmpl.syscom_product_id,
+                        "nota": nota,
+                        "err": exc,
+                    },
+                })
+
+        # El cursor avanza solo hasta la última plantilla realmente atendida. Antes usaba
+        # `templates[-1].id` pasara lo que pasara: cuando un 429 tumbaba 84 plantillas
+        # seguidas, el cursor pasaba sobre las 84 y no volvían hasta el ciclo completo
+        # siguiente, ~7 h después.
+
+        return {
+            "templates": templates, "atendidas": atendidas, "updated": updated,
+            "failed": failed, "retirados": retirados, "despublicados": despublicados,
+            "sin_proveedor": sin_proveedor, "rate_limit": rate_limit,
+        }
+
+    def _cerrar_corrida_de_refresco(self, params, now, r1, r2):
+        """Avanza el cursor, escribe el resumen y aplaza la ruta si hubo 429."""
+        templates = r2["templates"]
+        atendidas = r2["atendidas"]
+        rate_limit = r2["rate_limit"]
+        updated, failed = r2["updated"], r2["failed"]
+        retirados, despublicados = r2["retirados"], r2["despublicados"]
+        sin_proveedor = r2["sin_proveedor"]
+        selected, staging_fallidos = r1["selected"], r1["staging_fallidos"]
+
+        if r2.get("ciclo_cerrado"):
+            # `_cerrar_ciclo_de_refresco` ya dejó cursor y log; no hay lote que resumir.
+            params.set_param("sync_syscom.stock_refresh_last_run", fields.Datetime.to_string(now))
+            return
+
+        if atendidas:
+            params.set_param("sync_syscom.stock_refresh_last_id", str(atendidas[-1].id))
+        elif templates and not rate_limit:
+            # Lote entero sin proveedor SYSCOM: hay que avanzar igual o el cursor se
+            # queda clavado en él para siempre.
             params.set_param("sync_syscom.stock_refresh_last_id", str(templates[-1].id))
+        # `stock_refresh_last_run` ya no gobierna nada: era la marca que leía la vieja
+        # compuerta de horas. Se conserva solo como dato de diagnóstico —cuándo corrió
+        # el último lote—. No lo uses para decidir si toca refrescar.
         params.set_param("sync_syscom.stock_refresh_last_run", fields.Datetime.to_string(now))
+
+        # El mensaje viejo decía "actualizadas: N, fallidas: M" y nada más: no separaba
+        # causas, no contaba las saltadas por no tener proveedor SYSCOM, y no reportaba
+        # los fallos de la pasada 1 en absoluto. Y salía siempre en `info`, así que 100
+        # plantillas caídas se veían igual que una corrida perfecta.
+        partes = ["Plantillas SYSCOM actualizadas: %s" % updated]
+        if failed:
+            partes.append("fallidas: %s (de ellas retiradas de SYSCOM: %s)" % (failed, retirados))
+        else:
+            partes.append("fallidas: 0")
+        if despublicados:
+            partes.append("DESPUBLICADAS por retirada confirmada: %s" % despublicados)
+        if sin_proveedor:
+            partes.append("saltadas sin proveedor SYSCOM: %s" % sin_proveedor)
+        partes.append("staging marcados en lote: %s" % len(selected))
+        if staging_fallidos:
+            partes.append("staging con error: %s" % staging_fallidos)
+        if rate_limit:
+            partes.append("CORTADO POR HTTP 429, la ruta queda en pausa")
 
         self.env["sync.syscom.log"].sudo().create({
             "name": "Refresco stock/precios SYSCOM",
-            "kind": "info",
-            "message": "Plantillas SYSCOM actualizadas: %(u)s, fallidas: %(f)s. Staging marcados en lote: %(s)s" % {
-                "u": updated,
-                "f": failed,
-                "s": len(selected),
-            },
+            # Un rate limit no es culpa del módulo y ya tiene su propio aviso; un fallo
+            # real sí merece asomar por encima del ruido de rutina.
+            "kind": "warn" if (failed or staging_fallidos) else "info",
+            "message": ". ".join(partes) + ".",
         })
+
+        if rate_limit:
+            aplazar_por_rate_limit(
+                self.env, RUTA_STOCK, rate_limit, "Refresco de stock/precios",
+                cron_xmlid="sync_syscom.cron_sync_syscom_stock_daily",
+                con_tope=False,
+            )
+        else:
+            reiniciar_aplazamientos(self.env, RUTA_STOCK)
 
     def action_publish_selected(self):
         """Enriquece productos seleccionados con detalle, convierte MXN y publica en product.template."""
@@ -1540,124 +1818,194 @@ class SyscomProduct(models.Model):
         }
 
     def queue_products_for_background_publish(self, products, source_label=None):
-        """Queue products for background publication."""
-        products = products.exists()
-        if not products:
-            return 0
+        """Encola productos para publicación en background.
 
-        queued_at = fields.Datetime.now()
-        products.write({
+        Encolar un ALCANCE (una marca, unas categorías) no es lo mismo que reintentar
+        un fallo. Este método hace lo primero, así que no toca el historial de fallos:
+
+        - No limpia ``sync_error`` ni las fechas de intento. El desenlace los reescribe
+          igual —``cron_publish_selected_products`` escribe ``sync_error`` tanto al
+          publicar como al fallar—, así que limpiarlos aquí no aporta nada y destruye
+          el diagnóstico durante toda la ventana hasta que el cron llegue. Con el cron
+          apagado esa ventana son meses.
+        - No toca ``publish_retry_count``: es lo único con semántica real, gobierna el
+          dominio del cron. Un producto en ``error`` con 2 intentos conserva su cuenta
+          y le queda uno; ponerla en 0 le daría reintentos infinitos.
+        - Omite los ``abandoned``: ese estado significa que el sistema se rindió a
+          propósito tras agotar los reintentos. Resucitarlos sin que nadie lo pida
+          reabre el gasto de cuota que ya se quemó una vez.
+
+        El reintento deliberado tiene su propio camino y ahí sí limpia todo:
+        ``action_reset_publish_state``.
+
+        Devuelve un dict con ``recibidos``, ``encolados`` y ``omitidos_abandonados``.
+        """
+        products = products.exists()
+        recibidos = len(products)
+        abandonados = products.filtered(lambda prod: prod.publish_state == "abandoned")
+        encolables = products - abandonados
+        resultado = {
+            "recibidos": recibidos,
+            "encolados": len(encolables),
+            "omitidos_abandonados": len(abandonados),
+        }
+        if not encolables:
+            return resultado
+
+        encolables.write({
             "publish_state": "pending",
-            "publish_enqueued_at": queued_at,
-            "publish_started_at": False,
-            "publish_done_at": False,
-            "publish_retry_count": 0,
-            "sync_error": False,
+            "publish_enqueued_at": fields.Datetime.now(),
         })
 
         source = source_label or "selección manual"
+        mensaje = "Se programó la publicación de %(count)s productos. Origen: %(source)s. Modelos: %(products)s." % {
+            "count": len(encolables),
+            "source": source,
+            "products": self._describe_products_for_log(encolables),
+        }
+        if abandonados:
+            mensaje += (
+                "\nOmitidos por estado abandonado: %s. No se reintentan desde un encolado por alcance; "
+                "para reintentarlos, selecciónalos y usa 'Reiniciar estado de publicación'." % len(abandonados)
+            )
         self.env["sync.syscom.log"].sudo().create({
             "name": "Publicación en background (inicio)",
-            "kind": "info",
-            "message": "Se programó la publicación de %(count)s productos. Origen: %(source)s. Modelos: %(products)s."
-            % {
-                "count": len(products),
-                "source": source,
-                "products": self._describe_products_for_log(products),
-            },
+            "kind": "warn" if abandonados else "info",
+            "message": mensaje,
         })
-        return len(products)
+        return resultado
 
     def action_start_publish_selected_background(self):
         """Compatibilidad: usa el modo explícito de marcados en lote."""
         return self.action_start_publish_marked_background()
 
+    def _notificacion_job(self, job, descripcion, menu, con_etapa=False, nombre_corto=None):
+        """Notificación de los botones que crean un job: ID real, nuevo o reusado, y menú.
+
+        ``descripcion`` es qué hace el job ("sincronización de catálogo de modelos");
+        ``nombre_corto`` es cómo se le llama al hablar de uno que ya existe ("catálogo de
+        modelos"), porque "Ya había un trabajo de sincronización de..." se lee mal.
+        Ambos en minúsculas y sin punto final.
+        """
+        if job.env.context.get("sync_syscom_job_creado", True):
+            mensaje = _("Trabajo #%(id)s creado: %(que)s. Síguelo en %(menu)s.") % {
+                "id": job.id,
+                "que": descripcion,
+                "menu": menu,
+            }
+            tipo, pegajoso = "success", False
+        else:
+            mensaje = _(
+                "Ya había un trabajo de %(que)s en curso: %(detalle)s. No se creó otro. "
+                "Síguelo en %(menu)s."
+            ) % {
+                "que": nombre_corto or descripcion,
+                "detalle": self._descripcion_job_existente(job, con_etapa=con_etapa),
+                "menu": menu,
+            }
+            tipo, pegajoso = "warning", True
+        return {
+            "type": "ir.actions.client",
+            "tag": "display_notification",
+            "params": {
+                "title": _("Sync SYSCOM"),
+                "message": mensaje,
+                "type": tipo,
+                "sticky": pegajoso,
+            },
+        }
+
+    def _texto_cola_publicacion(self):
+        """Coletilla común: quién publica lo encolado y dónde verlo.
+
+        Estos botones no crean job, así que no hay ID que citar ni ficha que abrir. El
+        cron responsable es el único dato que explica por qué "no pasa nada" si está
+        apagado.
+        """
+        return _(
+            "Los publica en segundo plano el cron '%(cron)s'; míralos en %(menu)s, "
+            "filtro Pendientes."
+        ) % {"cron": CRON_PUBLICAR, "menu": MENU_TRABAJOS_PUBLICACION}
+
+    def _notificacion_encolado(self, resultado, origen):
+        """Notificación común de los botones que encolan publicación por alcance."""
+        encolados = resultado["encolados"]
+        if encolados:
+            mensaje = _("%(n)s de %(origen)s en cola para publicar. ") % {
+                "n": _("1 modelo") if encolados == 1 else _("%s modelos") % encolados,
+                "origen": origen,
+            } + self._texto_cola_publicacion()
+        else:
+            # Sin nada en cola no se cita el menú: mandar a una lista vacía no ayuda.
+            mensaje = _("No se encoló nada para %s.") % origen
+        if resultado["omitidos_abandonados"]:
+            mensaje += _(
+                " Se omitieron %s productos abandonados: agotaron sus reintentos y no se resucitan"
+                " desde aquí. Para reintentarlos, selecciónalos y usa 'Reiniciar estado de publicación'."
+            ) % resultado["omitidos_abandonados"]
+        # Aviso pegajoso si no se encoló nada o si se omitió algo: son los dos casos en
+        # los que el usuario tiene que enterarse de que su clic no hizo lo que creía.
+        alerta = not encolados or bool(resultado["omitidos_abandonados"])
+        return {
+            "type": "ir.actions.client",
+            "tag": "display_notification",
+            "params": {
+                "title": _("Sync SYSCOM"),
+                "message": mensaje,
+                "type": "warning" if alerta else "success",
+                "sticky": alerta,
+            },
+        }
+
     def action_start_publish_records_background(self):
         products = self._require_records_for_view_action("Publicar selección vista")
-        queued = self.queue_products_for_background_publish(
+        resultado = self.queue_products_for_background_publish(
             products,
             source_label="Selección vista (%s)" % ", ".join(products.mapped("syscom_id")),
         )
-        return {
-            "type": "ir.actions.client",
-            "tag": "display_notification",
-            "params": {
-                "title": "Sync SYSCOM",
-                "message": "Publicación iniciada en segundo plano para la selección vista (%s productos)." % queued,
-                "type": "success",
-                "sticky": False,
-            },
-        }
+        return self._notificacion_encolado(resultado, _("la selección vista"))
 
     def action_start_publish_marked_background(self):
         products = self._require_marked_for_batch("Publicar marcados en lote")
-        queued = self.queue_products_for_background_publish(
+        resultado = self.queue_products_for_background_publish(
             products,
             source_label="Marcados en lote (%s)" % ", ".join(products.mapped("syscom_id")),
         )
-
-        return {
-            "type": "ir.actions.client",
-            "tag": "display_notification",
-            "params": {
-                "title": "Sync SYSCOM",
-                "message": "Publicación iniciada en segundo plano para marcados en lote (%s productos)." % queued,
-                "type": "success",
-                "sticky": False,
-            },
-        }
+        return self._notificacion_encolado(resultado, _("marcados en lote"))
 
     def action_start_recompute_syscom_costs(self):
         job = self.env["sync.syscom.cost.job"].create_recompute_all_job()
-        return {
-            "type": "ir.actions.client",
-            "tag": "display_notification",
-            "params": {
-                "title": "Sync SYSCOM",
-                "message": "Trabajo de recálculo de costos programado: %s." % job.display_name,
-                "type": "success",
-                "sticky": False,
-            },
-        }
+        return self._notificacion_job(job, _("recálculo de costos"), MENU_TRABAJOS_COSTOS)
 
     def action_start_sync_catalog_models(self):
         job = self.env["sync.syscom.sync.job"].create_brands_products_job()
-        return {
-            "type": "ir.actions.client",
-            "tag": "display_notification",
-            "params": {
-                "title": "Sync SYSCOM",
-                "message": "Trabajo de sincronización de catálogo de modelos programado: %s." % job.display_name,
-                "type": "success",
-                "sticky": False,
-            },
-        }
+        # Mismo tipo de job que el botón 1 de Marcas, así que puede reusar uno encolado
+        # desde allá. Por eso lleva `con_etapa`: es el único de los cuatro con etapas.
+        return self._notificacion_job(
+            job,
+            _("sincronización de catálogo de modelos"),
+            MENU_TRABAJOS_SYNC,
+            con_etapa=True,
+            nombre_corto=_("catálogo de modelos"),
+        )
 
     def action_start_sync_extended_product_data(self):
         job = self.env["sync.syscom.product.data.job"].create_sync_all_job()
-        return {
-            "type": "ir.actions.client",
-            "tag": "display_notification",
-            "params": {
-                "title": "Sync SYSCOM",
-                "message": "Trabajo de datos extendidos programado: %s." % job.display_name,
-                "type": "success",
-                "sticky": False,
-            },
-        }
+        return self._notificacion_job(
+            job,
+            _("datos extendidos (garantía, dimensiones, peso y características)"),
+            MENU_TRABAJOS_DATOS,
+            nombre_corto=_("datos extendidos"),
+        )
 
     def action_start_configure_syscom_dropshipping(self):
         job = self.env["sync.syscom.dropship.job"].create_configure_all_job()
-        return {
-            "type": "ir.actions.client",
-            "tag": "display_notification",
-            "params": {
-                "title": "Sync SYSCOM",
-                "message": "Trabajo de dropshipping SYSCOM programado: %s." % job.display_name,
-                "type": "success",
-                "sticky": False,
-            },
-        }
+        return self._notificacion_job(
+            job,
+            _("regularizar dropshipping"),
+            MENU_TRABAJOS_DROPSHIP,
+            nombre_corto=_("dropshipping"),
+        )
 
     def _get_publish_max_retries(self, params=None):
         """Número máximo de reintentos antes de marcar un producto como 'abandoned'."""
@@ -1668,23 +2016,99 @@ class SyscomProduct(models.Model):
         except (TypeError, ValueError):
             return DEFAULT_PUBLISH_MAX_RETRIES
 
+    def _toca_despublicar_retirado(self, tmpl, vals, params, ahora):
+        """True si esta plantilla retirada ya cumple las dos condiciones para salir de la tienda.
+
+        Se exigen **las dos** a propósito:
+
+        - ``retirado_404_min_intentos``: un 404 suelto podría ser un fallo de enrutado
+          de la API, y despublicar se le nota al cliente.
+        - ``retirado_404_min_horas``: un contador mide *intentos*, y el número de
+          intentos depende de que el cron corra a su ritmo. El 21/08/2026 el cron 58
+          llegó a correr 5 veces de más por un `_trigger` mal puesto; con solo contador,
+          el umbral se habría alcanzado en horas en vez de en un día.
+
+        Y al revés: solo con la condición de tiempo, un cron parado dos días
+        despublicaría con una sola confirmación al volver. Por eso las dos.
+
+        **Con los valores de hoy (1 intento / 24 h) y ciclo semanal, el efecto real es
+        despublicar en el SEGUNDO ciclo**, o sea una semana después de la retirada: el
+        primer 404 pone la marca de inicio y la condición de horas aún no se cumple.
+        Para que despublique al primer 404 hay que poner también las horas a 0.
+
+        El blindaje de stock propio de HERGON manda sobre todo lo demás: si hay
+        existencia en bodega, el producto se queda publicado aunque SYSCOM lo haya
+        retirado, porque se puede vender igual.
+        """
+        if not getattr(tmpl, "is_published", False) or "is_published" not in tmpl._fields:
+            return False
+        if (getattr(tmpl, "syscom_stock_propio", 0) or 0) > 0:
+            return False
+
+        try:
+            min_intentos = int(params.get_param("sync_syscom.retirado_404_min_intentos") or DEFAULT_RETIRADO_404_MIN_INTENTOS)
+        except (TypeError, ValueError):
+            min_intentos = DEFAULT_RETIRADO_404_MIN_INTENTOS
+        try:
+            min_horas = float(params.get_param("sync_syscom.retirado_404_min_horas") or DEFAULT_RETIRADO_404_MIN_HORAS)
+        except (TypeError, ValueError):
+            min_horas = DEFAULT_RETIRADO_404_MIN_HORAS
+
+        if (vals.get("syscom_404_consecutivos") or 0) < max(min_intentos, 1):
+            return False
+
+        desde = vals.get("syscom_404_desde") or tmpl.syscom_404_desde
+        if not desde:
+            return False
+        return (ahora - desde) >= timedelta(hours=max(min_horas, 0))
+
+    @staticmethod
+    def _es_error_definitivo(mensaje):
+        """True si reintentar no puede cambiar el resultado.
+
+        Un HTTP 404 de /productos/{id} significa que SYSCOM ya no tiene ese producto en
+        el catálogo. Los tres reintentos gastan tres llamadas para recibir tres veces la
+        misma respuesta. El resto de errores (429, timeouts, cortes de red, fallos de
+        base de datos) sí pueden salir bien en el siguiente intento y conservan sus
+        reintentos.
+
+        El texto lo arma SyscomClient._format_error como "HTTP %s: %s", así que el
+        prefijo es estable.
+        """
+        return "HTTP 404" in (mensaje or "")
+
     def action_reset_publish_state(self):
         """Reinicia el estado de publicación de los productos seleccionados para que se reintenten."""
         records = self.exists()
         if not records:
-            raise UserError("Selecciona al menos un producto.")
+            raise UserError(_("Selecciona al menos un producto."))
         records.write({
             "publish_state": "pending",
             "publish_retry_count": 0,
             "sync_error": False,
             "publish_enqueued_at": fields.Datetime.now(),
         })
+        # Este sí limpia el contador y el error a propósito: es el reintento deliberado
+        # sobre una selección concreta, lo contrario del encolado en masa de 8a59f3d.
+        # El participio y el verbo tienen que concordar, así que la frase entera cambia;
+        # no basta con conmutar el sustantivo como en los mensajes de conteo.
+        if len(records) == 1:
+            encabezado = _(
+                "1 modelo reiniciado: vuelve a la cola con el contador de reintentos en "
+                "cero y sin el error anterior. "
+            )
+        else:
+            encabezado = _(
+                "%s modelos reiniciados: vuelven a la cola con el contador de reintentos "
+                "en cero y sin el error anterior. "
+            ) % len(records)
+        mensaje = encabezado + self._texto_cola_publicacion()
         return {
             "type": "ir.actions.client",
             "tag": "display_notification",
             "params": {
-                "title": "Sync SYSCOM",
-                "message": "%s productos reiniciados para publicación." % len(records),
+                "title": _("Sync SYSCOM"),
+                "message": mensaje,
                 "type": "success",
                 "sticky": False,
             },
@@ -1708,6 +2132,11 @@ class SyscomProduct(models.Model):
 
         max_retries = self._get_publish_max_retries(params)
 
+        # Este cron corre cada minuto, así que sin esta comprobación volvería a la API
+        # 60 s después de un 429.
+        if segundos_de_pausa_restantes(self.env, RUTA_PUBLICAR):
+            return
+
         # También reintentar productos en estado 'error' que aún no superaron el límite.
         pending = self.search(
             [("publish_state", "in", ["pending", "error"]),
@@ -1728,22 +2157,41 @@ class SyscomProduct(models.Model):
         ok = 0
         err = 0
         abandoned = 0
+        rate_limit = None
+        atendidos = self.browse()
         for prod in pending:
+            atendidos |= prod
             try:
-                detail = client.get_product_detail(prod.syscom_id) or {}
-                _template, _created, low_stock_note = self._publish_one_from_detail(prod, detail, params, exchange_rate, exchange_rate_date, price_currency)
-                prod.write({
-                    "publish_state": "done",
-                    "publish_done_at": fields.Datetime.now(),
-                    "publish_retry_count": 0,
-                    "selected": False,
-                    "sync_error": low_stock_note or False,
-                })
+                # Savepoint por producto. Sin el, un fallo de base de datos (el
+                # SerializationFailure que sale cuando el cron 66 encola mientras este
+                # publica) deja el cursor abortado y entonces revienta el propio write
+                # del except: se pierde el lote entero y no queda ni rastro en el log.
+                # Ademas fuerza el flush aqui dentro, asi que un choque de escritura se
+                # atribuye a su producto en vez de tumbar el cron en el flush final.
+                with self.env.cr.savepoint():
+                    detail = client.get_product_detail(prod.syscom_id) or {}
+                    _template, _created, low_stock_note = self._publish_one_from_detail(prod, detail, params, exchange_rate, exchange_rate_date, price_currency)
+                    prod.write({
+                        "publish_state": "done",
+                        "publish_done_at": fields.Datetime.now(),
+                        "publish_retry_count": 0,
+                        "selected": False,
+                        "sync_error": low_stock_note or False,
+                    })
                 ok += 1
+            except SyscomRateLimitError as exc:
+                # El 429 no dice nada de este producto: no gasta reintento ni lo
+                # acerca a 'abandoned'. Tres 429 seguidos lo abandonaban por una
+                # razon que no tenia que ver con el. Vuelve a la cola tal cual.
+                atendidos -= prod
+                rate_limit = exc
+                break
             except Exception as exc:
                 err += 1
+                mensaje_error = str(exc)
+                definitivo = self._es_error_definitivo(mensaje_error)
                 new_retry_count = (prod.publish_retry_count or 0) + 1
-                if new_retry_count >= max_retries:
+                if definitivo or new_retry_count >= max_retries:
                     new_state = "abandoned"
                     abandoned += 1
                 else:
@@ -1752,30 +2200,55 @@ class SyscomProduct(models.Model):
                     "publish_state": new_state,
                     "publish_done_at": fields.Datetime.now(),
                     "publish_retry_count": new_retry_count,
-                    "sync_error": str(exc),
+                    "sync_error": mensaje_error,
                 })
-                self.env["sync.syscom.log"].sudo().create({
-                    "name": "Error publicación background",
-                    "kind": "error",
-                    "message": "%(label)s – intento %(n)s/%(max)s. Estado: %(state)s. Error: %(err)s." % {
+                if definitivo:
+                    detalle = "%(label)s – el producto ya no existe en SYSCOM, no se reintenta. Estado: %(state)s. Error: %(err)s." % {
+                        "label": prod.name or prod.syscom_id,
+                        "state": new_state,
+                        "err": exc,
+                    }
+                else:
+                    detalle = "%(label)s – intento %(n)s/%(max)s. Estado: %(state)s. Error: %(err)s." % {
                         "label": prod.name or prod.syscom_id,
                         "n": new_retry_count,
                         "max": max_retries,
                         "state": new_state,
                         "err": exc,
-                    },
+                    }
+                self.env["sync.syscom.log"].sudo().create({
+                    "name": "Error publicación background",
+                    "kind": "error",
+                    "message": detalle,
                 })
                 continue
 
+        # Los que quedaron sin atender siguen en 'processing' del write de arriba.
+        # Sin devolverlos a 'pending' se quedarían fuera del dominio del cron para
+        # siempre: 'processing' no está en ["pending", "error"].
+        sin_atender = pending - atendidos
+        if sin_atender:
+            sin_atender.write({"publish_state": "pending", "publish_started_at": False})
+
         self.env["sync.syscom.log"].sudo().create({
             "name": "Publicación en background (batch)",
-            "kind": "info",
-            "message": "Batch publicado. Modelos: %(products)s. OK: %(ok)s, errores: %(err)s, abandonados: %(ab)s."
+            "kind": "warn" if rate_limit else "info",
+            "message": "Batch publicado. Modelos: %(products)s. OK: %(ok)s, errores: %(err)s, abandonados: %(ab)s.%(rl)s"
             % {
-                "products": self._describe_products_for_log(pending),
+                "products": self._describe_products_for_log(atendidos or pending),
                 "ok": ok,
                 "err": err,
                 "ab": abandoned,
+                "rl": (" Cortado por HTTP 429: %s productos vuelven a la cola sin gastar reintento." % len(sin_atender)) if rate_limit else "",
             },
         })
+
+        if rate_limit:
+            aplazar_por_rate_limit(
+                self.env, RUTA_PUBLICAR, rate_limit, "Publicación en background",
+                cron_xmlid="sync_syscom.cron_sync_syscom_publish_selected",
+                con_tope=False,
+            )
+        else:
+            reiniciar_aplazamientos(self.env, RUTA_PUBLICAR)
  

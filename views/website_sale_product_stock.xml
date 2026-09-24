@@ -9,7 +9,7 @@
                 <div class="container my-3">
                     <div class="alert alert-info py-2 mb-0">
                         <strong>Disponible para envío:</strong>
-                        <span t-esc="tmpl.syscom_stock_new"/>
+                        <span t-esc="tmpl.syscom_stock_total"/>
                         <t t-if="tmpl.syscom_stock_synced_at">
                             <span class="ms-2 small text-muted">
                                 (Actualizado: <t t-esc="tmpl.syscom_stock_synced_at"/>)

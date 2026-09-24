@@ -47,9 +47,16 @@ class SyncSyscomDropshipJob(models.Model):
 
     @api.model
     def create_configure_all_job(self):
+        """Devuelve el job, creándolo solo si no hay otro en curso.
+
+        El recordset viene marcado con la clave de contexto ``sync_syscom_job_creado``
+        (True si se acaba de crear, False si se reusó), igual que
+        ``sync.syscom.sync.job._create_job``. Va por contexto y no como segundo valor de
+        retorno para no romper a quien solo espera el recordset.
+        """
         existing = self.search([("state", "in", ["pending", "running"])], order="create_date asc", limit=1)
         if existing:
-            return existing
+            return existing.with_context(sync_syscom_job_creado=False)
         job = self.create({"name": _("Regularizar dropshipping SYSCOM")})
         self.env["sync.syscom.log"].sudo().create({
             "name": _("Trabajo dropshipping creado"),
@@ -58,7 +65,7 @@ class SyncSyscomDropshipJob(models.Model):
                 "job": job.display_name,
             },
         })
-        return job
+        return job.with_context(sync_syscom_job_creado=True)
 
     def _mark_done(self):
         self.ensure_one()

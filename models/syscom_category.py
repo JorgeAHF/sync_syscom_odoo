@@ -1,13 +1,23 @@
 import time
+from datetime import timedelta
 
 from odoo import _, api, fields, models
 from odoo.exceptions import UserError
+from odoo.tools import format_date
 
+from .job_feedback import MENU_TRABAJOS_CATEGORIAS, MENU_TRABAJOS_SYNC
 from .syscom_client import SyscomClient
+
+# Días sin refrescarse a partir de los cuales una marca se considera rancia en los
+# avisos del botón "Ver qué marcas hay en lo seleccionado". Es un umbral elegido a
+# ojo y conviene saberlo: no hay ningún cron que programe el barrido de marcas --el
+# 54 está apagado-- así que no existe una cadencia esperada contra la que medir.
+UMBRAL_MARCA_RANCIA_DIAS = 7
 
 
 class SyscomCategory(models.Model):
     _name = "sync.syscom.category"
+    _inherit = ["sync.syscom.job.feedback"]
     _description = "Categoría SYSCOM"
     _order = "name"
 
@@ -109,7 +119,15 @@ class SyscomCategory(models.Model):
             cat_ids = Category.search([("id", "child_of", record.id)]).ids
             brands = Brand.browse([])
             if cat_ids:
-                brands = Brand.search([("category_ids.id", "in", cat_ids)])
+                # Vínculo declarado por SYSCOM en /marcas/{id}. Puede faltar aunque
+                # la categoría ya tenga modelos: medido el 11/09/2026, el 82% de las
+                # categorías con al menos un modelo no tenían ninguna marca aquí.
+                declaradas = Brand.search([("category_ids.id", "in", cat_ids)])
+                # Se completa con la marca de cada modelo ya vinculado a estas
+                # categorías -- el mismo dato que alimenta `model_count`, así que
+                # nunca puede haber modelos sin marca mostrada.
+                derivadas = Category.browse(cat_ids).product_ids.mapped("brand_id")
+                brands = declaradas | derivadas
             record.brand_ids_tree = brands
 
     def _compute_model_count(self):
@@ -406,138 +424,161 @@ class SyscomCategory(models.Model):
         return self._run_sync_brands_for_categories(selected_categories, source_label=_("marcadas en lote"))
 
     def _run_sync_brands_for_categories(self, selected_categories, source_label):
-        params = self.env["ir.config_parameter"].sudo()
-        selected_syscom_ids = set(selected_categories.mapped("syscom_id"))
-        chunk_limit = int(params.get_param("sync_syscom.brand_chunk_limit") or 50)
-        stats = self._sync_brands_for_scope(selected_syscom_ids, chunk_limit=chunk_limit)
+        """Muestra las marcas de las categorías seleccionadas, leyendo de la base local.
+
+        Antes esto salía a SYSCOM: pedía /marcas entero y luego un /marcas/{id} por
+        cada una de las 50 primeras, unas 51 llamadas por clic.  No servía: no había
+        puntero de avance, así que cada clic repetía exactamente las mismas 50 marcas
+        y las restantes eran inalcanzables por muchos clics que se dieran.  El
+        "restantes estimadas: 784" que devolvía era una constante disfrazada de
+        progreso.
+
+        Los vínculos marca–categoría ya los mantiene ``_sync_brands_batch``, el job
+        que mueve el cron 67, que sí recorre las 834 con un cursor de verdad.  Este
+        botón se limita a enseñar lo que ese trabajo dejó hecho: cero llamadas.
+        """
+        marcas = self._marcas_de_categorias(selected_categories)
+        frescura = self._frescura_de_marcas(marcas)
+
+        ids_categorias = ", ".join(selected_categories.mapped("syscom_id"))
+        if not marcas:
+            titulo = _("Marcas en lo seleccionado — ninguna")
+        elif frescura["rancias"]:
+            titulo = _("⚠ Marcas en lo seleccionado — %(n)s · %(r)s sin refrescar desde el %(fecha)s") % {
+                "n": len(marcas),
+                "r": frescura["rancias"],
+                "fecha": frescura["mas_antigua"],
+            }
+        else:
+            titulo = _("Marcas en lo seleccionado — %(n)s · dato local del %(fecha)s") % {
+                "n": len(marcas),
+                "fecha": frescura["mas_reciente"],
+            }
 
         self.env["sync.syscom.log"].create({
-            "name": _("Sincronización de marcas (categorías)"),
-            "kind": "info",
-            "message": _("Origen: %(source)s. Categorías: %(cats)s. Marcas vinculadas: %(kept)s, omitidas por categoría: %(skipped)s, timeout: %(t)s, procesadas en este lote: %(p)s, restantes estimadas: %(r)s")
-            % {
-                "source": source_label,
-                "cats": ", ".join(selected_categories.mapped("syscom_id")),
-                "kept": stats["kept"],
-                "skipped": stats["skipped"],
-                "t": stats["skipped_timeout"],
-                "p": stats["processed"],
-                "r": stats["remaining"],
-            },
+            "name": _("Marcas en lo seleccionado (consulta local)"),
+            "kind": "info" if (marcas and not frescura["rancias"]) else "warn",
+            "message": self._mensaje_marcas_locales(
+                source_label, ids_categorias, marcas, frescura
+            ),
         })
 
         return {
-            "type": "ir.actions.client",
-            "tag": "display_notification",
-            "params": {
-                "title": _("Sync SYSCOM"),
-                "message": _("Marcas sincronizadas desde %(source)s: %(kept)s (omitidas categoría: %(skipped)s, timeout: %(t)s). Lote procesado: %(p)s, restantes estimadas: %(r)s.")
-                % {
-                    "source": source_label,
-                    "kept": stats["kept"],
-                    "skipped": stats["skipped"],
-                    "t": stats["skipped_timeout"],
-                    "p": stats["processed"],
-                    "r": stats["remaining"],
-                },
-                "type": "success",
-                "sticky": False,
-            },
+            "type": "ir.actions.act_window",
+            "name": titulo,
+            "res_model": "sync.syscom.brand",
+            "view_mode": "list,form",
+            "domain": [("id", "in", marcas.ids)],
+            "target": "current",
+            "context": {"create": False},
+            "help": _(
+                "<p class=\"o_view_nocontent_smiling_face\">Ninguna marca vinculada a esas categorías</p>"
+                "<p>Puede ser que SYSCOM no tenga marcas ahí, o que el catálogo local esté "
+                "incompleto. Para refrescarlo usa <b>Actualizar lista de marcas</b> en "
+                "Marcas SYSCOM.</p>"
+            ),
         }
 
-    def _sync_brands_for_scope(self, selected_syscom_ids, chunk_limit=None):
-        """Sync brand records linked to selected SYSCOM categories."""
-        params = self.env["ir.config_parameter"].sudo()
-        token = (params.get_param("sync_syscom.syscom_api_token") or "").strip()
-        if not token:
-            raise UserError(_("Configura el token en Ajustes antes de sincronizar."))
-        if not selected_syscom_ids:
-            return {
-                "kept": 0,
-                "skipped": 0,
-                "skipped_timeout": 0,
-                "processed": 0,
-                "remaining": 0,
-                "brands": self.env["sync.syscom.brand"].browse([]),
-            }
+    def _marcas_de_categorias(self, categories):
+        """Marcas vinculadas a esas categorías, por coincidencia exacta.
 
-        base_url = params.get_param("sync_syscom.syscom_base_url") or "https://developers.syscom.mx/api/v1"
-        timeout = int(params.get_param("sync_syscom.syscom_timeout") or 30)
-        client = SyscomClient(base_url=base_url, token=token, timeout=timeout)
+        Sin descendientes, a propósito: es el alcance que ya tenía el botón cuando
+        salía a la API, y cambiarlo en el mismo movimiento mezclaría dos cosas.  La
+        columna «Marcas heredadas» de la lista sí incluye el subárbol
+        (``brand_ids_tree``), así que las dos lecturas están disponibles.
 
-        all_brands = client.get_brands() or []
-        kept = 0
-        skipped = 0
-        skipped_timeout = 0
-        processed = 0
-        remaining = 0
-        brand_records = self.env["sync.syscom.brand"].browse([])
+        Combina dos fuentes porque no siempre coinciden: el vínculo que SYSCOM
+        declara para la marca en /marcas/{id} (``category_ids``) y la marca de cada
+        modelo ya sincronizado en estas categorías (``product_ids.brand_id``). La
+        primera puede faltar aunque la segunda no -- medido el 11/09/2026: 82% de
+        las categorías con al menos un modelo no tenían ninguna marca declarada,
+        pese a que sus modelos sí traían marca propia.
+        """
+        if not categories:
+            return self.env["sync.syscom.brand"].browse()
+        declaradas = self.env["sync.syscom.brand"].search([("category_ids", "in", categories.ids)])
+        derivadas = categories.product_ids.mapped("brand_id")
+        return declaradas | derivadas
 
-        for brand in all_brands:
-            if chunk_limit and processed >= chunk_limit:
-                remaining += 1
-                continue
-            syscom_id = str(brand.get("id") or "").strip()
-            if not syscom_id:
-                continue
+    def _frescura_de_marcas(self, marcas):
+        """Cuántas marcas del alcance llevan sin refrescarse más de UMBRAL_MARCA_RANCIA_DIAS.
 
-            categories = brand.get("categorías") or brand.get("categorias") or []
-            detail = None
-            if not categories:
-                try:
-                    detail = client.get_brand_detail(syscom_id, timeout=10) or {}
-                    categories = detail.get("categorías") or detail.get("categorias") or []
-                except UserError:
-                    skipped_timeout += 1
-                    continue
+        Se mide sobre ``write_date`` y no sobre el último ``sync.syscom.sync.job``.
+        Es deliberado: el barrido del 20/08/2026 se corrió a mano y no dejó job, así
+        que el último job dice «error, 510/834» mientras los datos están completos.
+        El ``write_date`` es verdad lo escriba quien lo escriba.
+        """
+        vacio = {"rancias": 0, "mas_antigua": "", "mas_reciente": "", "total": 0}
+        if not marcas:
+            return vacio
 
-            cat_ids = []
-            for category in categories:
-                cat_syscom_id = str(category.get("id") or "").strip()
-                if not cat_syscom_id or cat_syscom_id not in selected_syscom_ids:
-                    continue
-                cat_record = self.search([("syscom_id", "=", cat_syscom_id)], limit=1)
-                if cat_record:
-                    cat_ids.append(cat_record.id)
-            if not cat_ids:
-                skipped += 1
-                continue
-
-            if detail is None:
-                try:
-                    detail = client.get_brand_detail(syscom_id, timeout=10) or {}
-                except UserError:
-                    skipped_timeout += 1
-                    continue
-
-            brand_vals = {
-                "syscom_id": syscom_id,
-                "name": detail.get("titulo") or brand.get("nombre") or syscom_id,
-                "title": detail.get("titulo") or brand.get("nombre") or "",
-                "description": detail.get("descripcion") or "",
-                "logo_url": detail.get("logo") or "",
-                "active": True,
-                "selected": True,
-            }
-            brand_record = self.env["sync.syscom.brand"].search([("syscom_id", "=", syscom_id)], limit=1)
-            if brand_record:
-                brand_record.write(brand_vals)
-            else:
-                brand_record = self.env["sync.syscom.brand"].create(brand_vals)
-            brand_record.category_ids = [(6, 0, cat_ids)]
-
-            brand_records |= brand_record
-            kept += 1
-            processed += 1
-
+        limite = fields.Datetime.now() - timedelta(days=UMBRAL_MARCA_RANCIA_DIAS)
+        fechas = [m.write_date for m in marcas if m.write_date]
+        if not fechas:
+            return vacio
+        rancias = [f for f in fechas if f < limite]
         return {
-            "kept": kept,
-            "skipped": skipped,
-            "skipped_timeout": skipped_timeout,
-            "processed": processed,
-            "remaining": remaining,
-            "brands": brand_records,
+            "total": len(marcas),
+            "rancias": len(rancias),
+            "mas_antigua": format_date(self.env, min(rancias or fechas)),
+            "mas_reciente": format_date(self.env, max(fechas)),
         }
+
+    def _mensaje_marcas_locales(self, source_label, ids_categorias, marcas, frescura):
+        """Texto del log. Aparte para no meter cuatro ramas dentro del create()."""
+        Brand = self.env["sync.syscom.brand"]
+        total_catalogo = Brand.search_count([])
+        limite = fields.Datetime.now() - timedelta(days=UMBRAL_MARCA_RANCIA_DIAS)
+        rancias_globales = Brand.search([("write_date", "<", fields.Datetime.to_string(limite))])
+
+        cabecera = _("Origen: %(source)s. Categorías: %(cats)s.") % {
+            "source": source_label,
+            "cats": ids_categorias,
+        }
+
+        if not marcas:
+            return "%s\n%s\n%s" % (
+                cabecera,
+                _("No hay ninguna marca vinculada a esas categorías en el catálogo local."),
+                _(
+                    "Puede ser que SYSCOM no tenga marcas ahí, o que el catálogo local esté "
+                    "incompleto: %(total)s marcas, %(rancias)s sin refrescar desde el %(fecha)s. "
+                    "Para refrescar usa \"Actualizar lista de marcas\" en Marcas SYSCOM."
+                ) % {
+                    "total": total_catalogo,
+                    "rancias": len(rancias_globales),
+                    "fecha": format_date(self.env, min(rancias_globales.mapped("write_date"))) if rancias_globales else "-",
+                },
+            )
+
+        lineas = [
+            cabecera,
+            _("Marcas encontradas: %(n)s.") % {"n": len(marcas)},
+            _("Alcance: coincidencia exacta con las categorías seleccionadas, sin descendientes."),
+            _("Consultado en el catálogo local, sin llamar a SYSCOM."),
+        ]
+        if frescura["rancias"]:
+            lineas.append(
+                _("Frescura del alcance: %(r)s de %(n)s llevan sin refrescarse desde el %(fecha)s.")
+                % {"r": frescura["rancias"], "n": len(marcas), "fecha": frescura["mas_antigua"]}
+            )
+            lineas.append(
+                _("Para refrescar el catálogo usa \"Actualizar lista de marcas\" en Marcas SYSCOM.")
+            )
+        else:
+            lineas.append(
+                _("Frescura del alcance: las %(n)s se refrescaron el %(fecha)s.")
+                % {"n": len(marcas), "fecha": frescura["mas_reciente"]}
+            )
+        lineas.append(
+            _("Catálogo de marcas: %(total)s en total, %(rancias)s sin refrescar desde el %(fecha)s.")
+            % {
+                "total": total_catalogo,
+                "rancias": len(rancias_globales),
+                "fecha": format_date(self.env, min(rancias_globales.mapped("write_date"))) if rancias_globales else "-",
+            }
+        )
+        return "\n".join(lineas)
 
     def _get_scope_categories(self, include_children=True):
         """Return categories in scope from the current recordset."""
@@ -566,13 +607,24 @@ class SyscomCategory(models.Model):
             include_children=bool(include_children),
         )
 
+        # create_for_categories nunca reusa: cada clic crea un job nuevo.
+        n_modelos = job.total_products
+        n_cats = len(categories)
         return {
             "type": "ir.actions.client",
             "tag": "display_notification",
             "params": {
                 "title": _("Sync SYSCOM"),
-                "message": _("Trabajo de publicación por categoría programado desde %(source)s: %(job)s.")
-                % {"source": source_label, "job": job.display_name},
+                "message": _(
+                    "Trabajo de publicación #%(id)s creado: %(modelos)s de %(cats)s, "
+                    "%(alcance)s. Síguelo en %(menu)s."
+                ) % {
+                    "id": job.id,
+                    "modelos": _("1 modelo") if n_modelos == 1 else _("%s modelos") % n_modelos,
+                    "cats": _("1 categoría") if n_cats == 1 else _("%s categorías") % n_cats,
+                    "alcance": _("subcategorías incluidas") if include_children else _("sin subcategorías"),
+                    "menu": MENU_TRABAJOS_CATEGORIAS,
+                },
                 "type": "success",
                 "sticky": False,
             },
@@ -581,14 +633,29 @@ class SyscomCategory(models.Model):
     def action_sync_categories_and_brands(self):
         """Programa sincronización completa en background."""
         job = self.env["sync.syscom.sync.job"].create_full_catalog_job()
+        if job.env.context.get("sync_syscom_job_creado", True):
+            mensaje = _(
+                "Trabajo #%(id)s creado: catálogo completo (categorías, marcas y "
+                "modelos). Síguelo en %(menu)s."
+            ) % {"id": job.id, "menu": MENU_TRABAJOS_SYNC}
+            tipo, pegajoso = "success", False
+        else:
+            mensaje = _(
+                "Ya había un trabajo de catálogo completo en curso: %(detalle)s. "
+                "No se creó otro. Síguelo en %(menu)s."
+            ) % {
+                "detalle": self._descripcion_job_existente(job, con_etapa=True),
+                "menu": MENU_TRABAJOS_SYNC,
+            }
+            tipo, pegajoso = "warning", True
         return {
             "type": "ir.actions.client",
             "tag": "display_notification",
             "params": {
                 "title": _("Sync SYSCOM"),
-                "message": _("Trabajo de sincronización completa programado: %s.") % job.display_name,
-                "type": "success",
-                "sticky": False,
+                "message": mensaje,
+                "type": tipo,
+                "sticky": pegajoso,
             },
         }
 
@@ -598,14 +665,28 @@ class SyscomCategory(models.Model):
 
     def action_start_category_sync(self):
         job = self.env["sync.syscom.sync.job"].create_categories_only_job()
+        if job.env.context.get("sync_syscom_job_creado", True):
+            mensaje = _(
+                "Trabajo #%(id)s creado: sincronización de categorías. Síguelo en %(menu)s."
+            ) % {"id": job.id, "menu": MENU_TRABAJOS_SYNC}
+            tipo, pegajoso = "success", False
+        else:
+            mensaje = _(
+                "Ya había un trabajo de categorías en curso: %(detalle)s. "
+                "No se creó otro. Síguelo en %(menu)s."
+            ) % {
+                "detalle": self._descripcion_job_existente(job),
+                "menu": MENU_TRABAJOS_SYNC,
+            }
+            tipo, pegajoso = "warning", True
         return {
             "type": "ir.actions.client",
             "tag": "display_notification",
             "params": {
                 "title": _("Sync SYSCOM"),
-                "message": _("Trabajo de sincronización de categorías programado: %s.") % job.display_name,
-                "type": "success",
-                "sticky": False,
+                "message": mensaje,
+                "type": tipo,
+                "sticky": pegajoso,
             },
         }
 

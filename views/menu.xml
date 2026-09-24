@@ -11,10 +11,12 @@
             <field name="context">{'module': 'sync_syscom'}</field>
         </record>
 
+        <!-- Huérfana: ningún menú la usa desde que menu_sync_syscom_sync_all apunta a
+             server_action_sync_cat_brand. Se le quitó el binding_model_id porque
+             aparecía en el menú Acciones de la lista de Usuarios de Odoo. -->
         <record id="server_action_sync_cat_brand_models" model="ir.actions.server">
             <field name="name">Sincronizar categorías, marcas y modelos</field>
             <field name="model_id" ref="base.model_res_users"/>
-            <field name="binding_model_id" ref="base.model_res_users"/>
             <field name="binding_type">action</field>
             <field name="state">code</field>
             <field name="code">
@@ -37,9 +39,16 @@ action = env["sync.syscom.category"].action_start_sync_pipeline()
         />
         <menuitem
             id="menu_sync_syscom_sync_all"
-            name="Categorías/Marcas/Modelos"
+            name="Actualizar categorías, marcas y modelos"
             parent="menu_sync_syscom_sync"
-            action="server_action_sync_cat_brand_models"
+            action="server_action_sync_cat_brand"
+            groups="sync_syscom.group_sync_syscom_manager"
+        />
+        <menuitem
+            id="menu_sync_syscom_health"
+            name="Salud de sincronización"
+            parent="menu_sync_syscom_sync"
+            action="action_sync_syscom_health_wizard"
             groups="sync_syscom.group_sync_syscom_manager"
         />
         <menuitem
@@ -86,11 +95,10 @@ action = env["sync.syscom.category"].action_start_sync_pipeline()
         />
         <menuitem
             id="menu_sync_syscom_sync_categories"
-            name="Sync Categorías"
+            name="Actualizar árbol de categorías"
             parent="menu_sync_syscom_sync"
             action="server_action_sync_syscom_category"
             groups="sync_syscom.group_sync_syscom_manager"
-            active="False"
         />
         <menuitem
             id="menu_sync_syscom_sync_brands"
@@ -142,6 +150,14 @@ action = env["sync.syscom.category"].action_start_sync_pipeline()
             name="Logs"
             parent="menu_sync_syscom_root"
             action="action_sync_syscom_log"
+            groups="sync_syscom.group_sync_syscom_manager"
+        />
+        <menuitem
+            id="menu_sync_syscom_fix_accounting"
+            name="Corregir cuentas contables"
+            parent="menu_sync_syscom_root"
+            action="server_action_fix_accounting_accounts"
+            sequence="30"
             groups="sync_syscom.group_sync_syscom_manager"
         />
 

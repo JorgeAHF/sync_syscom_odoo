@@ -1,6 +1,6 @@
 from html import escape
 
-from odoo import fields, models
+from odoo import api, fields, models
 
 
 class ProductTemplate(models.Model):
@@ -24,13 +24,49 @@ class ProductTemplate(models.Model):
         string="Stock SYSCOM (nuevo)",
         help="Existencia 'nuevo' devuelta por SYSCOM (solo informativo para ecommerce).",
     )
+    syscom_stock_propio = fields.Integer(
+        string="Stock propio HERGON",
+        help="Unidades en bodega de HERGON. Se suman a las de SYSCOM para mostrar "
+             "disponibilidad en la tienda. Si es mayor a 0, el refresco de stock no "
+             "despublica el producto aunque SYSCOM no tenga existencia. La cantidad "
+             "se lleva manualmente: no se descuenta sola al vender.",
+        default=0,
+    )
     syscom_stock_synced_at = fields.Datetime(
         string="Stock SYSCOM actualizado",
     )
+    syscom_stock_total = fields.Integer(
+        string="Disponible total",
+        compute="_compute_syscom_stock_total",
+        store=True,
+        help="Suma del stock de SYSCOM mas el stock propio de HERGON. "
+             "Es la cantidad que se muestra al cliente en la tienda.",
+    )
+
     syscom_api_ok = fields.Boolean(
         string="SYSCOM API OK",
         help="Último estado de validación/refresh contra SYSCOM para este producto.",
         default=True,
+    )
+    syscom_404_consecutivos = fields.Integer(
+        string="404 seguidos",
+        default=0,
+        help="Cuántos refrescos seguidos han recibido HTTP 404 de SYSCOM. Se limpia con "
+             "cualquier refresco bueno. Un 429 no lo toca: no dice nada del producto.",
+    )
+    syscom_404_desde = fields.Datetime(
+        string="Retirado desde",
+        help="Cuándo empezó la racha actual de 404. Junto al contador decide la "
+             "despublicación automática: hacen falta las dos condiciones porque un "
+             "contador solo mide intentos, y el número de intentos depende de que el "
+             "cron corra a su ritmo.",
+    )
+    syscom_sync_error = fields.Text(
+        string="Último error SYSCOM",
+        help="Motivo del último refresco fallido contra SYSCOM. Se limpia en cuanto "
+             "un refresco sale bien. Espejo del campo del mismo nombre en "
+             "sync.syscom.product: sin él, syscom_api_ok = False no dice por qué, y "
+             "un producto retirado del catálogo es indistinguible de un rate limit.",
     )
     syscom_uom_sat = fields.Char(
         string="Unidad SAT (SYSCOM)",
@@ -55,6 +91,24 @@ class ProductTemplate(models.Model):
     )
     syscom_features_json = fields.Json(
         string="Características SYSCOM",
+    )
+    syscom_icono_sup_izq = fields.Char(
+        string="Ícono SYSCOM (sup. izq.)",
+        help="URL del ícono de característica que SYSCOM ubica en la esquina "
+             "superior izquierda de la tarjeta del producto. Solo dato; el "
+             "dibujado en la tienda vive en hergon_tema, no aquí.",
+    )
+    syscom_icono_sup_der = fields.Char(
+        string="Ícono SYSCOM (sup. der.)",
+        help="Igual que syscom_icono_sup_izq, esquina superior derecha.",
+    )
+    syscom_icono_inf_izq = fields.Char(
+        string="Ícono SYSCOM (inf. izq.)",
+        help="Igual que syscom_icono_sup_izq, esquina inferior izquierda.",
+    )
+    syscom_icono_inf_der = fields.Char(
+        string="Ícono SYSCOM (inf. der.)",
+        help="Igual que syscom_icono_sup_izq, esquina inferior derecha.",
     )
 
     def _has_syscom_vendor(self):
@@ -107,3 +161,8 @@ class ProductTemplate(models.Model):
             value = "\n".join("- %s" % line for line in lines)
         self.sudo().write({field_name: value})
         return True
+
+    @api.depends("syscom_stock_new", "syscom_stock_propio")
+    def _compute_syscom_stock_total(self):
+        for registro in self:
+            registro.syscom_stock_total = (registro.syscom_stock_new or 0) + (registro.syscom_stock_propio or 0)

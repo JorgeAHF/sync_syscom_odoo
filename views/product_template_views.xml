@@ -12,11 +12,24 @@
                             <field name="syscom_is_product" readonly="1"/>
                             <field name="syscom_product_id" readonly="1"/>
                             <field name="brand_id"/>
+                            <field name="syscom_stock_new" readonly="1"/>
+                            <field name="syscom_stock_propio"/>
+                            <field name="syscom_stock_total" readonly="1"/>
                             <field name="syscom_warranty"/>
                             <field name="weight"/>
                             <field name="syscom_height_cm"/>
                             <field name="syscom_length_cm"/>
                             <field name="syscom_width_cm"/>
+                        </group>
+                        <group string="Estado del refresco">
+                            <field name="syscom_stock_synced_at" readonly="1"/>
+                            <field name="syscom_api_ok" readonly="1"/>
+                            <field name="syscom_sync_error" readonly="1"
+                                   invisible="syscom_api_ok"/>
+                            <field name="syscom_404_consecutivos" readonly="1"
+                                   invisible="syscom_404_consecutivos == 0"/>
+                            <field name="syscom_404_desde" readonly="1"
+                                   invisible="syscom_404_consecutivos == 0"/>
                         </group>
                         <group string="Características">
                             <field name="syscom_features_json"/>
