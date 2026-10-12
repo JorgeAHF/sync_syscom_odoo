@@ -24,7 +24,7 @@ action = env["sync.syscom.category"].action_start_sync_pipeline()
             </field>
         </record>
 
-        <menuitem id="menu_sync_syscom_root" name="SyncSyscom" groups="sync_syscom.group_sync_syscom_manager"/>
+        <menuitem id="menu_sync_syscom_root" name="SyncSyscom" groups="sync_syscom.group_sync_syscom_manager" web_icon="sync_syscom,static/description/icon.png"/>
         <menuitem
             id="menu_sync_syscom_sync"
             name="Sincronizar"
