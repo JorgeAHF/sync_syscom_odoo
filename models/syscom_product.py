@@ -243,10 +243,16 @@ class SyscomProduct(models.Model):
             )
 
     def _find_template_for_syscom_product(self, default_code, syscom_product_id):
-        """Find an existing SYSCOM-managed template without touching unrelated products."""
+        """Find an existing SYSCOM-managed template without touching unrelated products.
+
+        Busca también entre las archivadas: el refresco archiva las que SYSCOM retiró, y
+        si SYSCOM vuelve a venderla y alguien la publica, hay que reusar esa plantilla
+        (con su historial de pedidos) en vez de crear un duplicado. Quien llama la
+        reactiva con `_vals_reactivar_retirada`.
+        """
         default_code = (default_code or "").strip()
         syscom_product_id = (syscom_product_id or "").strip()
-        Template = self.env["product.template"].sudo()
+        Template = self.env["product.template"].sudo().with_context(active_test=False)
 
         if syscom_product_id:
             template = Template.search([("syscom_product_id", "=", syscom_product_id)], limit=1)
@@ -1079,6 +1085,7 @@ class SyscomProduct(models.Model):
             "syscom_stock_synced_at": fields.Datetime.now(),
             "syscom_api_ok": True,
             "syscom_uom_sat": uom_sat or False,
+            **self._vals_reactivar_retirada(),
         }
         if template:
             template.write(template_vals)
@@ -1412,7 +1419,7 @@ class SyscomProduct(models.Model):
             self._cerrar_ciclo_de_refresco(params, now)
             return {
                 "templates": Template.browse(), "atendidas": Template.browse(),
-                "updated": 0, "failed": 0, "retirados": 0, "despublicados": 0,
+                "updated": 0, "failed": 0, "retirados": 0, "despublicados": 0, "archivados": 0,
                 "sin_proveedor": 0, "rate_limit": None, "ciclo_cerrado": True,
             }
 
@@ -1420,6 +1427,7 @@ class SyscomProduct(models.Model):
         sin_proveedor = 0
         retirados = 0
         despublicados = 0
+        archivados = 0
 
         # Si la pasada 1 ya chocó con el rate limit, no se insiste con las 200 de esta.
         for tmpl in (templates if not rate_limit else Template.browse()):
@@ -1513,12 +1521,23 @@ class SyscomProduct(models.Model):
                     vals["syscom_404_consecutivos"] = (tmpl.syscom_404_consecutivos or 0) + 1
                     if not tmpl.syscom_404_desde:
                         vals["syscom_404_desde"] = now
-                    if self._toca_despublicar_retirado(tmpl, vals, params, now):
+                    # Las dos decisiones se toman sobre el estado de antes de escribir.
+                    despublicar = self._toca_despublicar_retirado(tmpl, vals, params, now)
+                    archivar = self._toca_archivar_retirado(tmpl, vals, params, now)
+                    if despublicar:
                         vals["is_published"] = False
                         despublicados += 1
+                    if archivar:
+                        vals["active"] = False
+                        archivados += 1
+                        nota = "Retirado de SYSCOM, ARCHIVADO%s. " % (
+                            " y DESPUBLICADO" if despublicar else "")
+                    elif despublicar:
                         nota = "Retirado de SYSCOM, DESPUBLICADO. "
-                    else:
+                    elif getattr(tmpl, "is_published", False):
                         nota = "Retirado de SYSCOM, sigue publicado. "
+                    else:
+                        nota = "Retirado de SYSCOM, ya estaba despublicado. "
                 # Un error que no sea 404 no toca los contadores de retirada: no prueba
                 # que el producto viva, así que tampoco corta la racha.
 
@@ -1542,6 +1561,7 @@ class SyscomProduct(models.Model):
         return {
             "templates": templates, "atendidas": atendidas, "updated": updated,
             "failed": failed, "retirados": retirados, "despublicados": despublicados,
+            "archivados": archivados,
             "sin_proveedor": sin_proveedor, "rate_limit": rate_limit,
         }
 
@@ -1552,6 +1572,7 @@ class SyscomProduct(models.Model):
         rate_limit = r2["rate_limit"]
         updated, failed = r2["updated"], r2["failed"]
         retirados, despublicados = r2["retirados"], r2["despublicados"]
+        archivados = r2.get("archivados", 0)
         sin_proveedor = r2["sin_proveedor"]
         selected, staging_fallidos = r1["selected"], r1["staging_fallidos"]
 
@@ -1582,6 +1603,8 @@ class SyscomProduct(models.Model):
             partes.append("fallidas: 0")
         if despublicados:
             partes.append("DESPUBLICADAS por retirada confirmada: %s" % despublicados)
+        if archivados:
+            partes.append("ARCHIVADAS por retirada confirmada: %s" % archivados)
         if sin_proveedor:
             partes.append("saltadas sin proveedor SYSCOM: %s" % sin_proveedor)
         partes.append("staging marcados en lote: %s" % len(selected))
@@ -1740,6 +1763,7 @@ class SyscomProduct(models.Model):
                     "syscom_stock_synced_at": fields.Datetime.now(),
                     "syscom_api_ok": True,
                     "syscom_uom_sat": uom_sat or False,
+                    **self._vals_reactivar_retirada(),
                 }
                 if template:
                     template.write(template_vals)
@@ -2016,6 +2040,20 @@ class SyscomProduct(models.Model):
         except (TypeError, ValueError):
             return DEFAULT_PUBLISH_MAX_RETRIES
 
+    @staticmethod
+    def _vals_reactivar_retirada():
+        """Valores para una plantilla que se publica con éxito desde SYSCOM.
+
+        Si estaba archivada por retirada, vuelve a estar activa, y la racha de 404 se
+        corta: la API acaba de devolver el producto, así que vive.
+        """
+        return {
+            "active": True,
+            "syscom_404_consecutivos": 0,
+            "syscom_404_desde": False,
+            "syscom_sync_error": False,
+        }
+
     def _toca_despublicar_retirado(self, tmpl, vals, params, ahora):
         """True si esta plantilla retirada ya cumple las dos condiciones para salir de la tienda.
 
@@ -2042,6 +2080,24 @@ class SyscomProduct(models.Model):
         """
         if not getattr(tmpl, "is_published", False) or "is_published" not in tmpl._fields:
             return False
+        return self._retirada_confirmada(tmpl, vals, params, ahora)
+
+    def _toca_archivar_retirado(self, tmpl, vals, params, ahora):
+        """True si esta plantilla retirada ya debe archivarse (pedido de Jorge, 09/11/2026).
+
+        Mismas condiciones que la despublicación, pero sin mirar si está publicada:
+        así también se archivan las que ya estaban despublicadas de antes.
+
+        Archivar no borra nada: la plantilla sigue ligada a pedidos y facturas y se
+        restaura desde el panel. Además sale del refresco de stock, que busca solo
+        plantillas activas, y deja de gastar una llamada a SYSCOM por semana.
+        """
+        if not tmpl.active:
+            return False
+        return self._retirada_confirmada(tmpl, vals, params, ahora)
+
+    def _retirada_confirmada(self, tmpl, vals, params, ahora):
+        """Las dos condiciones de retirada (intentos y horas) más el blindaje de stock propio."""
         if (getattr(tmpl, "syscom_stock_propio", 0) or 0) > 0:
             return False
 
